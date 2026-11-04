@@ -1,0 +1,45 @@
+publiccodeYmlVersion: "0.4"
+
+name: GTFS.zone RT Accuracy
+url: "https://github.com/gtfs-zone/gtfs-zone-rt-accuracy"
+landingURL: "https://accuracy.rt.gtfs.zone"
+
+platforms:
+  - web
+
+categories:
+  - data-visualization
+  - data-analytics
+
+developmentStatus: concept
+
+softwareType: "standalone/web"
+
+description:
+  en:
+    shortDescription: >
+      A static frontend that scores GTFS Realtime predictions against TIDES actuals.
+    longDescription: >
+      GTFS.zone RT Accuracy loads TIDES data packages, either uploaded or from
+      the gtfs.zone archive, and measures how far each producer's stop time
+      predictions were from the actual stop visits. Every feed is compared
+      against a simple baseline prediction computed in the browser. It is a
+      static single-page app with no backend of its own.
+    features:
+      - TIDES data package upload
+      - Browse packages published by gtfs-zone-rt-archive
+      - Prediction error against actuals and a simple baseline
+
+legal:
+  license: AGPL-3.0-or-later
+
+maintenance:
+  type: community
+  contacts:
+    - name: Max Katz-Christy
+      email: maxkatzchristy@gmail.com
+
+localisation:
+  localisationReady: false
+  availableLanguages:
+    - en
