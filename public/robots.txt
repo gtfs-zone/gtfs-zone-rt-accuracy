@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://accuracy.rt.gtfs.zone/sitemap.xml
