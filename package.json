@@ -1,6 +1,6 @@
 {
   "name": "gtfs-zone-rt-accuracy",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Static frontend that scores GTFS realtime predictions from TIDES data packages",
   "main": "src/index.html",
   "type": "module",
