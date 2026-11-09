@@ -14,7 +14,7 @@ export const en = {
   'nav.load': 'Load',
 
   'load.title': 'Load TIDES data',
-  'load.archive': 'From archive.rt.gtfs.zone',
+  'load.archive': 'From rt-archive.gtfs.zone',
   'load.feed': 'Feed',
   'load.from': 'From',
   'load.to': 'To',
@@ -86,7 +86,7 @@ export const en = {
     'How close do GTFS Realtime arrival predictions get to what actually happened? Load recorded predictions and find out.',
   'help.welcome.load': 'Load data',
   'help.welcome.loadText':
-    'Pick a feed and dates from archive.rt.gtfs.zone, or upload your own TIDES package.',
+    'Pick a feed and dates from rt-archive.gtfs.zone, or upload your own TIDES package.',
   'help.welcome.score': 'Read the scores',
   'help.welcome.scoreText':
     'Each producer is compared with actual times by horizon, route, date and hour.',
@@ -111,7 +111,7 @@ export const en = {
   'help.about.blurb':
     'accuracy.rt.gtfs.zone scores GTFS Realtime stop time predictions against the times vehicles actually reached each stop.',
   'help.about.blurb2':
-    'Data comes as TIDES packages: recorded by gtfs.zone and published at archive.rt.gtfs.zone, or uploaded from your computer. Everything is computed in your browser.',
+    'Data comes as TIDES packages: recorded by gtfs.zone and published at rt-archive.gtfs.zone, or uploaded from your computer. Everything is computed in your browser.',
   'help.about.subject': 'accuracy.rt.gtfs.zone feedback',
   'help.about.sibling': 'watch a GTFS Realtime feed live on a map',
 } as const;

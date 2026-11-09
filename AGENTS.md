@@ -2,7 +2,7 @@
 
 Static frontend at accuracy.rt.gtfs.zone that scores GTFS Realtime
 predictions. It loads TIDES data packages (uploaded, or listed from
-`archive.rt.gtfs.zone`, published by gtfs-zone-rt-archive) and compares each
+`rt-archive.gtfs.zone`, published by gtfs-zone-rt-archive) and compares each
 producer's `stop_time_predictions` and an in-browser baseline against the
 actual times in `stop_visits`. Built on gtfs-zone-web-common, laid out like
 gtfs-zone-rt-viewer.

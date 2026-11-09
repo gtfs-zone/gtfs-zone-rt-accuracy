@@ -17,7 +17,7 @@ export const fr: Translation<typeof en> = {
   'nav.load': 'Charger',
 
   'load.title': 'Charger des données TIDES',
-  'load.archive': 'Depuis archive.rt.gtfs.zone',
+  'load.archive': 'Depuis rt-archive.gtfs.zone',
   'load.feed': 'Flux',
   'load.from': 'Du',
   'load.to': 'Au',
@@ -91,7 +91,7 @@ export const fr: Translation<typeof en> = {
     'Les prédictions d’arrivée GTFS Realtime sont-elles proches de la réalité ? Chargez des prédictions enregistrées pour le savoir.',
   'help.welcome.load': 'Charger des données',
   'help.welcome.loadText':
-    'Choisissez un flux et des dates sur archive.rt.gtfs.zone, ou téléversez votre propre paquet TIDES.',
+    'Choisissez un flux et des dates sur rt-archive.gtfs.zone, ou téléversez votre propre paquet TIDES.',
   'help.welcome.score': 'Lire les scores',
   'help.welcome.scoreText':
     'Chaque producteur est comparé aux heures réelles par horizon, ligne, date et heure.',
@@ -117,7 +117,7 @@ export const fr: Translation<typeof en> = {
   'help.about.blurb':
     'accuracy.rt.gtfs.zone évalue les prédictions d’horaires GTFS Realtime par rapport aux heures auxquelles les véhicules ont réellement atteint chaque arrêt.',
   'help.about.blurb2':
-    'Les données sont des paquets TIDES : enregistrés par gtfs.zone et publiés sur archive.rt.gtfs.zone, ou téléversés depuis votre ordinateur. Tout est calculé dans votre navigateur.',
+    'Les données sont des paquets TIDES : enregistrés par gtfs.zone et publiés sur rt-archive.gtfs.zone, ou téléversés depuis votre ordinateur. Tout est calculé dans votre navigateur.',
   'help.about.subject': 'Retour sur accuracy.rt.gtfs.zone',
   'help.about.sibling': 'suivre un flux GTFS Realtime en direct sur une carte',
 };
