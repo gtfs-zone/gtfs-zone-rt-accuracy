@@ -1,4 +1,4 @@
-/** `index.json` of archive.rt.gtfs.zone, written by gtfs-zone-rt-archive. */
+/** `index.json` of rt-archive.gtfs.zone, written by gtfs-zone-rt-archive. */
 
 import { CONFIG } from '../config';
 

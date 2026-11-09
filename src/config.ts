@@ -1,7 +1,7 @@
 /** Application-wide constants. */
 export const CONFIG = {
   /** The public bucket gtfs-zone-rt-archive publishes TIDES packages to. */
-  ARCHIVE_BASE: 'https://archive.rt.gtfs.zone',
+  ARCHIVE_BASE: 'https://rt-archive.gtfs.zone',
 
   // Per-device map preferences, not part of a shared link.
   MAP_VIEW_KEY: 'accuracy.map.view',
