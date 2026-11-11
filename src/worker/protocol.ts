@@ -1,6 +1,7 @@
 /** Messages between the page and `accuracy.worker.ts`. */
 
-import type { Report } from '../metrics/score';
+import type { Ghost } from '../metrics/ghosts';
+import type { Report, ScoreFilter } from '../metrics/score';
 
 /** One TIDES package: a day from the archive, or uploaded files. */
 export type Source =
@@ -32,18 +33,34 @@ export interface FixColumns {
   vehicle: string[];
   trip: string[];
   route: string[];
+  serviceDate: string[];
 }
 
-export type Request =
+export type RequestBody =
   | { type: 'load'; packages: Source[]; actuals: Source | null }
   | {
       type: 'score';
-      /** [stop_id, lat, lon]; null skips the gps baseline. */
-      stops: [string, number, number][] | null;
+      /**
+       * [stop_id, lat, lon]; null skips the gps baseline, absent reuses the
+       * stops of the last score.
+       */
+      stops?: [string, number, number][] | null;
       timeZone: string;
+      filter?: ScoreFilter;
+    }
+  | {
+      type: 'ghosts';
+      time: number;
+      producers: string[];
+      /** Seconds a fix stays current. */
+      maxAge: number;
+      filter?: ScoreFilter;
     };
 
-export type Response =
+/** Every request carries an id that its responses echo. */
+export type Request = RequestBody & { id: number };
+
+export type ResponseBody =
   | { type: 'progress'; done: number; total: number }
   | {
       type: 'loaded';
@@ -52,4 +69,7 @@ export type Response =
       predictions: number;
     }
   | { type: 'report'; report: Report }
+  | { type: 'ghosts'; ghosts: Ghost[] }
   | { type: 'error'; message: string };
+
+export type Response = ResponseBody & { id: number };

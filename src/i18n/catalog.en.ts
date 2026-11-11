@@ -42,6 +42,13 @@ export const en = {
   'slider.pause': 'Pause',
   'slider.time': 'Map time',
   'slider.vehicles': '{n} vehicles',
+  'slider.ghosts': 'Ghosts',
+
+  'filter.route': 'Route {name}',
+  'filter.stop': 'Stop {name}',
+  'filter.vehicle': 'Vehicle {vehicle}',
+  'filter.vehicleTrip': 'Vehicle {vehicle}, trip {trip}',
+  'filter.clear': 'Show everything',
 
   'report.summary':
     '{trips} trips, {visits} stop visits scored, {samples} samples.',
@@ -105,8 +112,15 @@ export const en = {
   'help.baselines.lastStop':
     'last-stop: the delay at the last stop the vehicle left, carried to every later stop. Before the trip departs, how late its departure already is.',
   'help.baselines.gps':
-    'gps: the latest vehicle position, at most 5 minutes old, placed on the line through the trip stops. Its delay is the time of the fix minus the scheduled time at that point.',
+    'gps: the latest vehicle position, at most 5 minutes old, placed on the line through the trip stops, within the stretch the schedule allows at that time (10 min early to 60 min late). Its delay is the time of the fix minus the scheduled time at that point.',
   'help.baselines.floor': 'No baseline predicts a time before the sample time.',
+
+  'help.ghosts.label': 'Ghosts',
+  'help.ghosts.title': 'Ghost vehicles',
+  'help.ghosts.text':
+    'Turn on a producer under the time slider to draw a ghost for each vehicle: a ring where the delay that producer gives at the next stop puts the vehicle on the line through the trip stops. A dashed line joins it to the real vehicle. Baselines have dashed rings.',
+  'help.ghosts.filter':
+    'Click a route, stop or vehicle to narrow the scores and the ghosts to it. Click empty map to show everything again.',
 
   'help.about.blurb':
     'accuracy.rt.gtfs.zone scores GTFS Realtime stop time predictions against the times vehicles actually reached each stop.',

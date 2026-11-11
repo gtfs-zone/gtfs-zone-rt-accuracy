@@ -43,6 +43,8 @@ export interface Fix {
   t: number;
   lat: number;
   lon: number;
+  /** vehicle_id, or '' when absent. */
+  vehicle: string;
 }
 
 export interface Dataset {
@@ -249,7 +251,7 @@ export function buildDataset(
         list = [];
         fixes.set(key, list);
       }
-      list.push({ t, lat, lon });
+      list.push({ t, lat, lon, vehicle: r.vehicle_id ?? '' });
     }
   }
 

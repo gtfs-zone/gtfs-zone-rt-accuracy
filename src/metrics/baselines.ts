@@ -6,15 +6,18 @@
  * - `last-stop`: the delay at the last stop the vehicle has left (or reached),
  *   or how late the origin departure is when it has not left yet.
  * - `gps`: the latest fix projected onto the stop polyline, compared with the
- *   schedule interpolated at that distance.
+ *   schedule interpolated at that distance. Each fix is snapped only to the
+ *   stretch of the line the schedule allows at its time (GPS_EARLY early to
+ *   GPS_LATE late).
  */
 
-import type { Fix, Trip, Visit } from './dataset';
+import type { Dataset, Fix, Trip, Visit } from './dataset';
 
 /** Fixes older than this at sample time give no gps prediction. */
 export const GPS_MAX_AGE = 300;
-/** A projection may step back this far along the trip, in metres. */
-const BACKTRACK_M = 200;
+/** Earliest and latest a fix may put the vehicle against the schedule. */
+const GPS_EARLY = 600;
+const GPS_LATE = 3600;
 /** A fix within this distance of the origin counts as not yet departed. */
 const ORIGIN_M = 50;
 const EARTH_M = 6371008.8;
@@ -83,7 +86,7 @@ export function lastStopDelay(
   return dep === null ? null : Math.max(0, s - dep);
 }
 
-interface Polyline {
+export interface Polyline {
   lat0: number;
   x: number[];
   y: number[];
@@ -132,18 +135,21 @@ export function stopPolyline(
   return line;
 }
 
-/** Distance along `line` of the nearest point to (lat, lon) past `minDist`. */
+/** Distance along `line` of the nearest point to (lat, lon) within [lo, hi]. */
 export function project(
   line: Polyline,
   lat: number,
   lon: number,
-  minDist: number
+  lo: number,
+  hi: number
 ): number {
   const [px, py] = toXY(lat, lon, line.lat0);
   let best = Infinity;
-  let bestDist = Math.max(0, minDist);
+  let bestDist = lo;
   for (let i = 0; i + 1 < line.x.length; i++) {
-    if (line.cum[i + 1] < minDist) {
+    const c0 = line.cum[i];
+    const c1 = line.cum[i + 1];
+    if (c1 < lo || c0 > hi) {
       continue;
     }
     const ax = line.x[i];
@@ -151,13 +157,15 @@ export function project(
     const dx = line.x[i + 1] - ax;
     const dy = line.y[i + 1] - ay;
     const len2 = dx * dx + dy * dy;
+    const span = c1 - c0;
+    const fLo = span === 0 ? 0 : Math.max(0, (lo - c0) / span);
+    const fHi = span === 0 ? 0 : Math.min(1, (hi - c0) / span);
     let f = len2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / len2;
-    f = Math.min(1, Math.max(0, f));
+    f = Math.min(fHi, Math.max(fLo, f));
     const d = Math.hypot(px - (ax + f * dx), py - (ay + f * dy));
-    const along = line.cum[i] + f * (line.cum[i + 1] - line.cum[i]);
-    if (d < best && along >= minDist) {
+    if (d < best) {
       best = d;
-      bestDist = along;
+      bestDist = c0 + f * span;
     }
   }
   return bestDist;
@@ -178,13 +186,49 @@ export function scheduleAt(line: Polyline, dist: number): number {
   return line.dep[i] + f * (line.arr[i + 1] - line.dep[i]);
 }
 
+/**
+ * Distance along the line where the schedule has the vehicle at `time`: 0
+ * before the first departure, the line length after the last arrival, and
+ * the stop's distance while it dwells there.
+ */
+export function distAtSchedule(line: Polyline, time: number): number {
+  const n = line.cum.length;
+  const i = lastAtOrBefore(line.dep, time);
+  if (i < 0) {
+    return 0;
+  }
+  if (i >= n - 1 || time >= line.arr[i + 1]) {
+    return line.cum[Math.min(i + 1, n - 1)];
+  }
+  const span = line.arr[i + 1] - line.dep[i];
+  const f = span <= 0 ? 1 : (time - line.dep[i]) / span;
+  return line.cum[i] + f * (line.cum[i + 1] - line.cum[i]);
+}
+
+/** [lat, lon] of the point `dist` along the line. */
+export function pointAt(line: Polyline, dist: number): [number, number] {
+  const n = line.cum.length;
+  const d = Math.min(line.cum[n - 1], Math.max(0, dist));
+  const i = Math.min(n - 2, Math.max(0, lastAtOrBefore(line.cum, d)));
+  const span = line.cum[i + 1] - line.cum[i];
+  const f = span === 0 ? 0 : (d - line.cum[i]) / span;
+  const x = line.x[i] + f * (line.x[i + 1] - line.x[i]);
+  const y = line.y[i] + f * (line.y[i + 1] - line.y[i]);
+  const rad = Math.PI / 180;
+  return [y / (rad * EARTH_M), x / (rad * EARTH_M * Math.cos(line.lat0 * rad))];
+}
+
 /** Delays at each fix of the trip, for `gps`. */
 export function gpsSeries(line: Polyline, fixes: Fix[]): DelaySeries {
   const out: DelaySeries = { t: [], delay: [] };
-  let prev = 0;
   for (const fix of fixes) {
-    const dist = project(line, fix.lat, fix.lon, prev - BACKTRACK_M);
-    prev = Math.max(prev, dist);
+    const dist = project(
+      line,
+      fix.lat,
+      fix.lon,
+      distAtSchedule(line, fix.t - GPS_LATE),
+      distAtSchedule(line, fix.t + GPS_EARLY)
+    );
     const delay =
       dist <= ORIGIN_M
         ? Math.max(0, fix.t - line.dep[0])
@@ -202,4 +246,42 @@ export function gpsDelay(series: DelaySeries, s: number): number | null {
     return null;
   }
   return series.delay[i];
+}
+
+/** A trip's stop polyline and baseline delay series. */
+export interface TripBaselines {
+  line: Polyline | null;
+  lastStop: DelaySeries;
+  /** Null without stop positions. */
+  gps: DelaySeries | null;
+}
+
+/** Builds each trip's baselines once and keeps them for later calls. */
+export class BaselineCache {
+  private trips = new Map<string, TripBaselines>();
+
+  constructor(
+    private data: Dataset,
+    /** stop_id to [lat, lon]; without it there is no gps baseline. */
+    readonly stops?: Map<string, [number, number]>
+  ) {}
+
+  get(trip: Trip): TripBaselines {
+    let b = this.trips.get(trip.key);
+    if (!b) {
+      const line = this.stops ? stopPolyline(trip, this.stops) : null;
+      const fixes = this.data.fixes.get(trip.key);
+      b = {
+        line,
+        lastStop: lastStopSeries(trip),
+        gps: this.stops
+          ? line && fixes
+            ? gpsSeries(line, fixes)
+            : { t: [], delay: [] }
+          : null,
+      };
+      this.trips.set(trip.key, b);
+    }
+    return b;
+  }
 }

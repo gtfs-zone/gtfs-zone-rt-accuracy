@@ -64,6 +64,26 @@ const baselinesPage: HelpPage = {
     <p class="text-sm opacity-70">${t('report.method')}</p>`,
 };
 
+const ghostsPage: HelpPage = {
+  id: 'ghosts',
+  label: t('help.ghosts.label'),
+  group: 'Reference',
+  title: t('help.ghosts.title'),
+  render: () =>
+    `<div class="space-y-3 text-sm">
+      <div class="flex items-center gap-3">
+        <svg width="72" height="20" aria-hidden="true">
+          <circle cx="10" cy="10" r="6" fill="currentColor"/>
+          <line x1="16" y1="10" x2="54" y2="10" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4" opacity="0.8"/>
+          <circle cx="61" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="2.5"/>
+        </svg>
+        <span class="opacity-70">${t('help.ghosts.title')}</span>
+      </div>
+      <p>${t('help.ghosts.text')}</p>
+      <p>${t('help.ghosts.filter')}</p>
+    </div>`,
+};
+
 const ABOUT_APP: AboutApp = {
   name: 'accuracy.rt.gtfs.zone',
   blurb: [t('help.about.blurb'), t('help.about.blurb2')],
@@ -79,5 +99,6 @@ const ABOUT_APP: AboutApp = {
 export const HELP_PAGES: HelpPage[] = [
   welcomePage,
   baselinesPage,
+  ghostsPage,
   aboutPage(ABOUT_APP),
 ];

@@ -74,7 +74,8 @@ export function renderHorizonChart(
           width: 2,
           dash: isBaseline(p) ? [6, 4] : undefined,
           points: { size: 8, fill: producerColor(p, recorded) },
-          value: (_u: uPlot, v: number | null) => format(v),
+          value: (_u: uPlot, v: number | null) =>
+            v === null ? '--' : format(v),
         })),
       ],
     },

@@ -23,6 +23,7 @@ export function renderTimeSlider(): string {
         <span id="time-label"></span>
         <span id="time-vehicles"></span>
       </div>
+      <div id="ghost-toggles" class="hidden"></div>
     </div>`;
 }
 
@@ -70,6 +71,19 @@ export class TimeSlider {
   hide(): void {
     this.stop();
     this.root.classList.add('hidden');
+  }
+
+  /** The selected epoch second. */
+  get time(): number {
+    return this.value();
+  }
+
+  /** Move to `t`, clamped to the range, and emit the change. */
+  seek(t: number): void {
+    const min = Number(this.range.min);
+    const max = Number(this.range.max);
+    this.range.value = String(Math.min(max, Math.max(min, t)));
+    this.emit();
   }
 
   setVehicleCount(n: number): void {
