@@ -10,12 +10,10 @@
  */
 
 import {
+  BaselineCache,
   gpsDelay,
-  gpsSeries,
   lastStopDelay,
-  lastStopSeries,
-  stopPolyline,
-  type DelaySeries,
+  type TripBaselines,
 } from './baselines';
 import {
   visitKey,
@@ -39,11 +37,40 @@ const BIN = 10;
 /** Bins up to 3 h; the last one holds everything above. */
 const BINS = 1081;
 
+/** Narrows scoring to one route, the visits at some stops, or one trip. */
+export interface ScoreFilter {
+  routeId?: string;
+  /** A stop and its child platforms. */
+  stopIds?: string[];
+  tripKey?: string;
+}
+
 export interface ScoreOptions {
   /** stop_id to [lat, lon]; without it there is no gps baseline. */
   stops?: Map<string, [number, number]>;
+  /** Reused trip baselines; built from `stops` when absent. */
+  baselines?: BaselineCache;
   /** IANA zone for the hour-of-day breakdown. */
   timeZone: string;
+  filter?: ScoreFilter;
+}
+
+/** Whether `trip` passes the route and trip parts of `filter`. */
+export function tripMatches(trip: Trip, filter: ScoreFilter | undefined) {
+  if (!filter) {
+    return true;
+  }
+  if (filter.routeId !== undefined && trip.routeId !== filter.routeId) {
+    return false;
+  }
+  if (filter.tripKey !== undefined && trip.key !== filter.tripKey) {
+    return false;
+  }
+  if (filter.stopIds) {
+    const ids = filter.stopIds;
+    return trip.visits.some((v) => ids.includes(v.stopId));
+  }
+  return true;
 }
 
 export interface ProducerStats {
@@ -187,27 +214,10 @@ function pick(
   return arrival ? (arr ?? dep) : (dep ?? arr);
 }
 
-interface TripBaselines {
-  lastStop: DelaySeries;
-  gps: DelaySeries | null;
-}
-
-function tripBaselines(
-  trip: Trip,
-  data: Dataset,
-  stops: Map<string, [number, number]> | undefined
-): TripBaselines {
-  let gps: DelaySeries | null = null;
-  if (stops) {
-    const line = stopPolyline(trip, stops);
-    const fixes = data.fixes.get(trip.key);
-    gps = line && fixes ? gpsSeries(line, fixes) : { t: [], delay: [] };
-  }
-  return { lastStop: lastStopSeries(trip), gps };
-}
-
 export function score(data: Dataset, opts: ScoreOptions): Report {
-  const baselines = opts.stops ? [...BASELINES] : BASELINES.slice(0, 2);
+  const cache = opts.baselines ?? new BaselineCache(data, opts.stops);
+  const baselines = cache.stops ? [...BASELINES] : BASELINES.slice(0, 2);
+  const stopIds = opts.filter?.stopIds ? new Set(opts.filter.stopIds) : null;
   const producers = [...data.producers, ...baselines];
   const recorded = data.producers.length;
   const np = producers.length;
@@ -222,7 +232,7 @@ export function score(data: Dataset, opts: ScoreOptions): Report {
   const groups: Group[] = new Array(5);
 
   const counts: Report['counts'] = {
-    trips: data.trips.size,
+    trips: 0,
     visits: 0,
     visitsWithActual: 0,
     visitsScored: 0,
@@ -236,10 +246,17 @@ export function score(data: Dataset, opts: ScoreOptions): Report {
   const ptr = new Int32Array(recorded);
 
   for (const trip of data.trips.values()) {
+    if (!tripMatches(trip, opts.filter)) {
+      continue;
+    }
+    counts.trips++;
     let base: TripBaselines | null = null;
     const dateGroup = byDate.get(trip.serviceDate);
     const routeGroup = byRoute.get(trip.routeId || '-');
     for (const visit of trip.visits) {
+      if (stopIds && !stopIds.has(visit.stopId)) {
+        continue;
+      }
       counts.visits++;
       const actual = visit.actArr ?? visit.actDep;
       if (actual === null) {
@@ -264,7 +281,7 @@ export function score(data: Dataset, opts: ScoreOptions): Report {
         continue;
       }
       counts.visitsScored++;
-      base ??= tripBaselines(trip, data, opts.stops);
+      base ??= cache.get(trip);
       const sched = pick(arrival, visit.schedArr, visit.schedDep);
 
       // Start on the minute grid from the first prediction, inside the horizon.

@@ -9,3 +9,14 @@
     light --default,
     dark --prefersdark;
 }
+
+/* Keep the chart key on one line while hovered values change width. */
+.u-legend .u-series {
+  white-space: nowrap;
+}
+.u-legend .u-value {
+  display: inline-block;
+  min-width: 3.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

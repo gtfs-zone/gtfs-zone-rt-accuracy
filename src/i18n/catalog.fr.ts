@@ -47,6 +47,13 @@ export const fr: Translation<typeof en> = {
   'slider.pause': 'Pause',
   'slider.time': 'Heure de la carte',
   'slider.vehicles': '{n} véhicules',
+  'slider.ghosts': 'Fantômes',
+
+  'filter.route': 'Ligne {name}',
+  'filter.stop': 'Arrêt {name}',
+  'filter.vehicle': 'Véhicule {vehicle}',
+  'filter.vehicleTrip': 'Véhicule {vehicle}, course {trip}',
+  'filter.clear': 'Tout afficher',
 
   'report.summary':
     '{trips} courses, {visits} passages évalués, {samples} échantillons.',
@@ -110,9 +117,16 @@ export const fr: Translation<typeof en> = {
   'help.baselines.lastStop':
     'last-stop : le retard au dernier arrêt quitté par le véhicule, reporté sur tous les arrêts suivants. Avant le départ, le retard déjà pris par le départ.',
   'help.baselines.gps':
-    'gps : la dernière position du véhicule, datant d’au plus 5 minutes, placée sur la ligne reliant les arrêts de la course. Son retard est l’heure de la position moins l’heure planifiée à cet endroit.',
+    'gps : la dernière position du véhicule, vieille de 5 minutes au plus, placée sur la ligne qui relie les arrêts de la course, dans le tronçon que l’horaire permet à ce moment (10 min d’avance à 60 min de retard). Son retard est l’heure de la position moins l’heure prévue à cet endroit.',
   'help.baselines.floor':
     'Aucune référence ne prédit une heure antérieure à l’heure de l’échantillon.',
+
+  'help.ghosts.label': 'Fantômes',
+  'help.ghosts.title': 'Véhicules fantômes',
+  'help.ghosts.text':
+    'Activez un producteur sous le curseur de temps pour dessiner un fantôme de chaque véhicule : un cercle là où le retard de ce producteur au prochain arrêt place le véhicule sur la ligne qui relie les arrêts de la course. Une ligne pointillée le relie au véhicule réel. Les références ont des cercles pointillés.',
+  'help.ghosts.filter':
+    'Cliquez sur une ligne, un arrêt ou un véhicule pour y restreindre les scores et les fantômes. Cliquez sur une zone vide de la carte pour tout afficher à nouveau.',
 
   'help.about.blurb':
     'accuracy.rt.gtfs.zone évalue les prédictions d’horaires GTFS Realtime par rapport aux heures auxquelles les véhicules ont réellement atteint chaque arrêt.',

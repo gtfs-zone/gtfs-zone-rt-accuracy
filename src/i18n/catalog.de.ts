@@ -47,6 +47,13 @@ export const de: Translation<typeof en> = {
   'slider.pause': 'Pause',
   'slider.time': 'Kartenzeit',
   'slider.vehicles': '{n} Fahrzeuge',
+  'slider.ghosts': 'Geister',
+
+  'filter.route': 'Linie {name}',
+  'filter.stop': 'Haltestelle {name}',
+  'filter.vehicle': 'Fahrzeug {vehicle}',
+  'filter.vehicleTrip': 'Fahrzeug {vehicle}, Fahrt {trip}',
+  'filter.clear': 'Alles anzeigen',
 
   'report.summary':
     '{trips} Fahrten, {visits} Halte bewertet, {samples} Stichproben.',
@@ -111,9 +118,16 @@ export const de: Translation<typeof en> = {
   'help.baselines.lastStop':
     'last-stop: die Verspätung an der letzten Haltestelle, die das Fahrzeug verlassen hat, übertragen auf alle folgenden Haltestellen. Vor Fahrtbeginn die bereits bestehende Verspätung der Abfahrt.',
   'help.baselines.gps':
-    'gps: die letzte Fahrzeugposition, höchstens 5 Minuten alt, projiziert auf die Linie durch die Haltestellen der Fahrt. Ihre Verspätung ist die Zeit der Position minus der Fahrplanzeit an dieser Stelle.',
+    'gps: die letzte Fahrzeugposition, höchstens 5 Minuten alt, projiziert auf die Linie durch die Haltestellen der Fahrt, innerhalb des Abschnitts, den der Fahrplan zu dieser Zeit zulässt (10 min zu früh bis 60 min zu spät). Ihre Verspätung ist die Zeit der Position minus der Fahrplanzeit an dieser Stelle.',
   'help.baselines.floor':
     'Keine Referenz prognostiziert eine Zeit vor dem Zeitpunkt der Stichprobe.',
+
+  'help.ghosts.label': 'Geister',
+  'help.ghosts.title': 'Geisterfahrzeuge',
+  'help.ghosts.text':
+    'Schalten Sie unter dem Zeitregler einen Produzenten ein, um für jedes Fahrzeug einen Geist zu zeichnen: einen Ring dort, wo die Verspätung dieses Produzenten an der nächsten Haltestelle das Fahrzeug auf der Linie durch die Haltestellen der Fahrt verortet. Eine gestrichelte Linie verbindet ihn mit dem echten Fahrzeug. Referenzen haben gestrichelte Ringe.',
+  'help.ghosts.filter':
+    'Klicken Sie auf eine Linie, eine Haltestelle oder ein Fahrzeug, um die Bewertungen und Geister darauf einzuschränken. Ein Klick auf eine leere Stelle der Karte zeigt wieder alles.',
 
   'help.about.blurb':
     'accuracy.rt.gtfs.zone bewertet GTFS-Realtime-Prognosen von Haltezeiten anhand der Zeiten, zu denen Fahrzeuge jede Haltestelle tatsächlich erreicht haben.',

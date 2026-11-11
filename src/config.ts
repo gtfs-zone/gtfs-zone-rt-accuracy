@@ -6,6 +6,8 @@ export const CONFIG = {
   // Per-device map preferences, not part of a shared link.
   MAP_VIEW_KEY: 'accuracy.map.view',
   MAP_APPEARANCE_KEY: 'accuracy.map.appearance',
+  /** Producers whose ghost vehicles are drawn, per device. */
+  GHOSTS_KEY: 'accuracy.map.ghosts',
   /** The metric the panel shows, per device. */
   METRIC_KEY: 'accuracy.metric',
 

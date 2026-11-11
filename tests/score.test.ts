@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BaselineCache,
+  distAtSchedule,
   gpsDelay,
   gpsSeries,
   lastStopDelay,
   lastStopSeries,
+  pointAt,
+  scheduleAt,
   stopPolyline,
 } from '../src/metrics/baselines';
-import { buildDataset } from '../src/metrics/dataset';
+import { buildDataset, type Fix, type Trip } from '../src/metrics/dataset';
+import { ghostsAt } from '../src/metrics/ghosts';
 import { score } from '../src/metrics/score';
 import { STOPS, at, csv, fixturePackage, iso, D } from './fixture';
 
@@ -86,6 +91,69 @@ describe('gps baseline', () => {
     const series = gpsSeries(line, data.fixes.get(`${D}|T1`)!);
     expect(series.delay[0]).toBe(0);
   });
+
+  const fix = (hhmm: string, lat: number, lon = 0): Fix => ({
+    t: at(hhmm),
+    lat,
+    lon,
+    vehicle: 'V1',
+  });
+
+  it('inverts the schedule along the line', () => {
+    expect(distAtSchedule(line, at('09:00'))).toBe(0);
+    expect(scheduleAt(line, distAtSchedule(line, at('10:15')))).toBeCloseTo(
+      at('10:15'),
+      0
+    );
+    expect(distAtSchedule(line, at('11:00'))).toBe(line.cum[2]);
+    expect(pointAt(line, distAtSchedule(line, at('10:05')))[0]).toBeCloseTo(
+      0.005,
+      6
+    );
+  });
+
+  it('keeps a fix far down the line before departure at the origin', () => {
+    // At stop C, 10 min before the trip leaves A.
+    const series = gpsSeries(line, [fix('09:50', 0.02)]);
+    expect(series.delay[0]).toBe(0);
+  });
+
+  it('snaps a loop trip at its terminal to the start', () => {
+    const loop: Trip = {
+      key: `${D}|L1`,
+      serviceDate: D,
+      tripId: 'L1',
+      routeId: 'R1',
+      visits: [
+        ['A', '10:00'],
+        ['B', '10:10'],
+        ['E', '10:20'],
+        ['A', '10:30'],
+      ].map(([stopId, hhmm], i) => ({
+        seq: i + 1,
+        stopId,
+        schedArr: at(hhmm),
+        schedDep: at(hhmm),
+        actArr: null,
+        actDep: null,
+      })),
+    };
+    const stops = new Map(STOPS).set('E', [0.01, 0.01]);
+    const loopLine = stopPolyline(loop, stops)!;
+    const series = gpsSeries(loopLine, [fix('10:01', 0)]);
+    // At the origin one minute after departure, not at the end of the loop.
+    expect(series.delay[0]).toBe(60);
+  });
+
+  it('places a bus 45 min late', () => {
+    const series = gpsSeries(line, [fix('10:55', 0.01)]);
+    expect(series.delay[0]).toBeCloseTo(2700, 0);
+  });
+
+  it('caps the delay at 60 min late', () => {
+    const series = gpsSeries(line, [fix('11:20', 0.005)]);
+    expect(series.delay[0]).toBeCloseTo(3600, 0);
+  });
 });
 
 describe('score', () => {
@@ -148,6 +216,27 @@ describe('score', () => {
     expect(report.overall.producers.p.n).toBe(6);
   });
 
+  it('scores only the trips and stops the filter keeps', () => {
+    const data = buildDataset([fixturePackage()]);
+    const all = score(data, { timeZone: 'UTC' });
+    const route = score(data, { timeZone: 'UTC', filter: { routeId: 'R1' } });
+    expect(route.counts).toEqual(all.counts);
+    const trip = score(data, {
+      timeZone: 'UTC',
+      filter: { tripKey: `${D}|T1` },
+    });
+    expect(trip.counts.samples).toBe(25);
+    const other = score(data, { timeZone: 'UTC', filter: { routeId: 'R2' } });
+    expect(other.counts.trips).toBe(0);
+    expect(other.counts.samples).toBe(0);
+    const stopB = score(data, { timeZone: 'UTC', filter: { stopIds: ['B'] } });
+    expect(stopB.counts.trips).toBe(1);
+    expect(stopB.counts.visits).toBe(1);
+    expect(stopB.counts.samples).toBe(0);
+    const stopC = score(data, { timeZone: 'UTC', filter: { stopIds: ['C'] } });
+    expect(stopC.counts.samples).toBe(25);
+  });
+
   it('breaks samples down by local hour', () => {
     const report = score(buildDataset([fixturePackage()]), {
       timeZone: 'America/New_York',
@@ -155,5 +244,36 @@ describe('score', () => {
     expect(report.byHour.map((g) => g.key)).toEqual(['5']);
     expect(report.byRoute.map((g) => g.key)).toEqual(['R1']);
     expect(report.byDate.map((g) => g.key)).toEqual([D]);
+  });
+});
+
+describe('ghosts', () => {
+  const data = buildDataset([fixturePackage(undefined, [['10:15', 0.012]])]);
+  const cache = new BaselineCache(data, STOPS);
+
+  it('places each producer where its delay puts the vehicle', () => {
+    const ghosts = ghostsAt(
+      data,
+      cache,
+      at('10:16'),
+      ['p', 'schedule', 'last-stop'],
+      300
+    );
+    const by = Object.fromEntries(ghosts.map((g) => [g.producer, g]));
+    expect(ghosts.every((g) => g.tripKey === `${D}|T1`)).toBe(true);
+    expect(by.p.fromLat).toBe(0.012);
+    // On time: scheduled position at 10:16, 60% from B to C.
+    expect(by.schedule.lat).toBeCloseTo(0.016, 6);
+    // p predicts C at 10:24, 4 min late: scheduled position at 10:12.
+    expect(by.p.lat).toBeCloseTo(0.012, 6);
+    // last-stop: left B 3 min late, scheduled position at 10:13.
+    expect(by['last-stop'].lat).toBeCloseTo(0.013, 6);
+  });
+
+  it('skips stale fixes and other trips', () => {
+    expect(ghostsAt(data, cache, at('10:21'), ['schedule'], 300)).toEqual([]);
+    expect(
+      ghostsAt(data, cache, at('10:16'), ['schedule'], 300, { routeId: 'R2' })
+    ).toEqual([]);
   });
 });

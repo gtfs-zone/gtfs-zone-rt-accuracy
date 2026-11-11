@@ -6,7 +6,6 @@ import {
   syncAutoZoomControl,
   wireAutoZoomControl,
 } from 'gtfs-zone-web-common/map/auto-zoom';
-import type { VehiclePosition } from 'gtfs-zone-web-common/gtfs/rt-types';
 import { GTFSScheduled } from 'gtfs-zone-web-common/gtfs/scheduled';
 import {
   setHelpPages,
@@ -30,21 +29,39 @@ import {
 } from 'gtfs-zone-web-common/ui/navbar-actions';
 import { CONFIG } from './config';
 import { t } from './i18n/messages';
-import { MapController } from './map-controller';
+import {
+  MapController,
+  type AccuracyVehicle,
+  type MapFocus,
+} from './map-controller';
+import type { Ghost } from './metrics/ghosts';
+import type { Report, ScoreFilter } from './metrics/score';
 import {
   datesInRange,
   fetchArchiveIndex,
   type ArchiveIndex,
 } from './modules/archive-index';
-import { readHash, writeHash } from './modules/hash-state';
+import { GhostToggles } from './modules/ghost-toggles';
+import {
+  readHash,
+  writeHash,
+  type ArchiveSelection,
+} from './modules/hash-state';
 import { HELP_PAGES } from './modules/help-pages';
 import { showLoadModal, type LoadChoice } from './modules/load-modal';
 import { isMetric, type Metric } from './modules/metrics-format';
 import { resizeHorizonChart } from './modules/horizon-chart';
 import { DOCK_ICONS, NAVBAR_ACTIONS } from './modules/navbar-action-list';
+import { isBaseline, producerColor } from './modules/producer-colors';
 import { ReportView, type ReportViewState } from './modules/report-view';
 import { TimeSlider } from './modules/time-slider';
-import type { FixColumns, Request, Response, Source } from './worker/protocol';
+import type {
+  FixColumns,
+  RequestBody,
+  Response,
+  ResponseBody,
+  Source,
+} from './worker/protocol';
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
 
@@ -66,8 +83,8 @@ try {
   document.getElementById('map')!.innerHTML =
     `<div class="h-full flex items-center justify-center p-6 text-center text-sm opacity-70">${t('app.noWebgl')}</div>`;
 }
-mapCtrl.onSelect = (state) => mapCtrl.focus(state);
-mapCtrl.onEmptySelect = () => mapCtrl.focus({ type: 'home' });
+mapCtrl.onSelect = (state) => select(state);
+mapCtrl.onEmptySelect = () => select({ type: 'home' });
 new PanelResizer(appContainer, mapCtrl);
 
 document.getElementById('auto-zoom-mount')!.innerHTML = renderAutoZoomControl();
@@ -125,10 +142,16 @@ reportView.onMetric = (next) => {
   render({ metric });
 };
 
+reportView.onRoute = (routeId) => select({ type: 'route', route_id: routeId });
+reportView.onClearFilter = () => select({ type: 'home' });
+reportView.onSeek = (time) => slider.seek(time);
+
 themeController.onThemeChange(() => {
   mapCtrl.refreshAccentColor();
   // Series colors have their own light and dark steps.
   render({});
+  ghostToggles.render(fullReport?.producers ?? []);
+  drawGhosts();
 });
 new ResizeObserver(() => {
   const el = document.getElementById('horizon-chart');
@@ -153,6 +176,7 @@ function renderEmpty(): void {
 // ─── Map time ─────────────────────────────────────────────────────────────────
 
 const slider = new TimeSlider();
+const ghostToggles = new GhostToggles();
 let fixes: FixColumns | null = null;
 
 function lowerBound(values: Float64Array, x: number): number {
@@ -170,7 +194,7 @@ function lowerBound(values: Float64Array, x: number): number {
 }
 
 /** Each vehicle at its latest fix in (time - FIX_MAX_AGE_S, time]. */
-function vehiclesAt(time: number): VehiclePosition[] {
+function vehiclesAt(time: number): AccuracyVehicle[] {
   if (!fixes) {
     return [];
   }
@@ -190,6 +214,7 @@ function vehiclesAt(time: number): VehiclePosition[] {
     routeId: fixes!.route[i] || undefined,
     timestamp: fixes!.t[i],
     raw: null,
+    tripKey: fixes!.trip[i] ? `${fixes!.serviceDate[i]}|${fixes!.trip[i]}` : '',
   }));
 }
 
@@ -197,38 +222,181 @@ slider.onChange = (time) => {
   const vehicles = vehiclesAt(time);
   slider.setVehicleCount(vehicles.length);
   mapCtrl.showVehicles(vehicles);
+  mapCtrl.setActiveRoutes([
+    ...new Set(vehicles.flatMap((v) => (v.routeId ? [v.routeId] : []))),
+  ]);
+  reportView.setTime(time);
+  requestGhosts();
 };
+ghostToggles.onChange = () => requestGhosts();
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
 
 let worker: Worker | null = null;
 
-/** Runs one request; resolves with the first message that is not progress. */
+let nextRequestId = 0;
+
+/** Runs one request; resolves with its first response that is not progress. */
 function call(
   w: Worker,
-  req: Request,
+  req: RequestBody,
   onProgress?: (done: number, total: number) => void
-): Promise<Exclude<Response, { type: 'progress' | 'error' }>> {
+): Promise<Exclude<ResponseBody, { type: 'progress' | 'error' }>> {
+  const id = ++nextRequestId;
   return new Promise((resolve, reject) => {
+    const done = () => {
+      w.removeEventListener('message', onMessage);
+      w.removeEventListener('error', onError);
+    };
     const onMessage = (e: MessageEvent<Response>) => {
       const msg = e.data;
+      if (msg.id !== id) {
+        return;
+      }
       if (msg.type === 'progress') {
         onProgress?.(msg.done, msg.total);
         return;
       }
-      w.removeEventListener('message', onMessage);
+      done();
       if (msg.type === 'error') {
         reject(new Error(msg.message));
       } else {
         resolve(msg);
       }
     };
+    const onError = (e: ErrorEvent) => {
+      done();
+      reject(new Error(e.message));
+    };
     w.addEventListener('message', onMessage);
-    w.addEventListener('error', (e) => reject(new Error(e.message)), {
-      once: true,
-    });
-    w.postMessage(req);
+    w.addEventListener('error', onError);
+    w.postMessage({ ...req, id });
   });
+}
+
+// ─── Filter and ghosts ────────────────────────────────────────────────────────
+
+let gtfsFeed: GTFSScheduled | null = null;
+let selection: ArchiveSelection | null = null;
+let filter: MapFocus = { type: 'home' };
+/** The unfiltered report, restored when the filter is cleared. */
+let fullReport: Report | null = null;
+let scoreSeq = 0;
+
+/** A stop and its descendants, so a station matches its platforms. */
+function stopFamily(stopId: string): string[] {
+  const out = [stopId];
+  for (let i = 0; i < out.length; i++) {
+    out.push(...(gtfsFeed?.childrenByParent.get(out[i]) ?? []));
+  }
+  return out;
+}
+
+function scoreFilter(focus: MapFocus): ScoreFilter | undefined {
+  switch (focus.type) {
+    case 'route':
+      return { routeId: focus.route_id };
+    case 'stop':
+      return { stopIds: stopFamily(focus.stop_id) };
+    case 'vehicle':
+      return focus.tripKey ? { tripKey: focus.tripKey } : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/** Focus the map on `focus` and narrow the panel and ghosts to it. */
+function select(focus: MapFocus): void {
+  mapCtrl.focus(focus);
+  void applyFilter(focus);
+}
+
+async function applyFilter(focus: MapFocus): Promise<void> {
+  filter = focus;
+  writeHash(selection, focus);
+  requestGhosts();
+  const seq = ++scoreSeq;
+  const narrowed = scoreFilter(focus);
+  if (!fullReport || !worker) {
+    render({ filter });
+    return;
+  }
+  if (!narrowed) {
+    render({ filter, report: fullReport, status: null });
+    return;
+  }
+  render({ filter, status: t('load.scoring') });
+  try {
+    const scored = await call(worker, {
+      type: 'score',
+      timeZone: view?.timeZone ?? 'UTC',
+      filter: narrowed,
+    });
+    if (seq === scoreSeq && scored.type === 'report') {
+      render({ report: scored.report, status: null });
+    }
+  } catch (err) {
+    if (seq === scoreSeq) {
+      render({ status: null });
+      notify.error(String((err as Error).message ?? err));
+    }
+  }
+}
+
+let ghosts: Ghost[] = [];
+let ghostSeq = 0;
+let ghostBusy = false;
+let ghostAgain = false;
+
+function drawGhosts(): void {
+  const recorded = (fullReport?.producers ?? []).filter((p) => !isBaseline(p));
+  mapCtrl.showGhosts(
+    ghosts.map((g) => ({
+      ...g,
+      color: producerColor(g.producer, recorded),
+      dashed: isBaseline(g.producer),
+    }))
+  );
+}
+
+/** Ask for the ghosts at the slider time; one request runs at a time. */
+function requestGhosts(): void {
+  const producers = ghostToggles.enabled();
+  const seq = ++ghostSeq;
+  if (!worker || !fullReport || !fixes || producers.length === 0) {
+    ghosts = [];
+    drawGhosts();
+    return;
+  }
+  if (ghostBusy) {
+    ghostAgain = true;
+    return;
+  }
+  ghostBusy = true;
+  const w = worker;
+  call(w, {
+    type: 'ghosts',
+    time: slider.time,
+    producers,
+    maxAge: CONFIG.FIX_MAX_AGE_S,
+    filter: scoreFilter(filter),
+  })
+    .then((msg) => {
+      if (seq === ghostSeq && w === worker && msg.type === 'ghosts') {
+        ghosts = msg.ghosts;
+        drawGhosts();
+      }
+    })
+    .catch(() => {
+      // A failed ghost request leaves the last ghosts drawn.
+    })
+    .finally(() => {
+      ghostBusy = false;
+      if (ghostAgain) {
+        ghostAgain = false;
+        requestGhosts();
+      }
+    });
 }
 
 async function loadGtfs(
@@ -260,7 +428,11 @@ function describe(choice: LoadChoice): string {
 
 let generation = 0;
 
-async function load(choice: LoadChoice, index: ArchiveIndex | null) {
+async function load(
+  choice: LoadChoice,
+  index: ArchiveIndex | null,
+  focus: MapFocus = { type: 'home' }
+) {
   const gen = ++generation;
   const label = describe(choice);
   worker?.terminate();
@@ -272,8 +444,16 @@ async function load(choice: LoadChoice, index: ArchiveIndex | null) {
   );
   worker = w;
   fixes = null;
+  fullReport = null;
+  gtfsFeed = null;
+  filter = focus;
+  ghosts = [];
+  ghostBusy = false;
+  ghostAgain = false;
+  ghostToggles.render([]);
   slider.hide();
   mapCtrl.clearVehicles();
+  mapCtrl.showGhosts([]);
   view = {
     label,
     metas: [],
@@ -282,6 +462,8 @@ async function load(choice: LoadChoice, index: ArchiveIndex | null) {
     report: null,
     gpsMissing: false,
     metric,
+    feed: null,
+    filter: { type: 'home' },
   };
   render({});
   bottomSheet.close();
@@ -295,11 +477,12 @@ async function load(choice: LoadChoice, index: ArchiveIndex | null) {
       feed: choice.feed,
       date,
     }));
-    writeHash({ feed: choice.feed, from: choice.from, to: choice.to });
+    selection = { feed: choice.feed, from: choice.from, to: choice.to };
   } else {
     packages = [{ kind: 'files', files: choice.files }];
-    writeHash(null);
+    selection = null;
   }
+  writeHash(selection, focus);
   const actuals: Source | null = choice.actuals
     ? { kind: 'files', files: choice.actuals }
     : null;
@@ -335,6 +518,7 @@ async function load(choice: LoadChoice, index: ArchiveIndex | null) {
       return;
     }
     const timeZone = gtfs?.agencies[0]?.timezone || 'UTC';
+    gtfsFeed = gtfs;
     if (gtfs) {
       mapCtrl.loadScheduledFeed(gtfs);
     } else {
@@ -343,7 +527,7 @@ async function load(choice: LoadChoice, index: ArchiveIndex | null) {
     if (fixes.t.length) {
       slider.setRange(fixes.t[0], fixes.t[fixes.t.length - 1], timeZone);
     }
-    render({ timeZone, status: t('load.scoring') });
+    render({ timeZone, feed: gtfs, status: t('load.scoring') });
 
     const stops: [string, number, number][] | null = gtfs
       ? [...gtfs.stops.values()].map((s) => [s.id, s.lat, s.lon])
@@ -352,8 +536,15 @@ async function load(choice: LoadChoice, index: ArchiveIndex | null) {
     if (gen !== generation || scored.type !== 'report') {
       return;
     }
+    fullReport = scored.report;
     render({ report: scored.report, status: null, gpsMissing: !gtfs });
+    ghostToggles.render(scored.report.producers);
     notify.success(t('load.loaded', { label }));
+    if (filter.type !== 'home') {
+      select(filter);
+    } else {
+      requestGhosts();
+    }
   } catch (err) {
     if (gen !== generation) {
       return;
@@ -392,7 +583,8 @@ async function boot(): Promise<void> {
   if (linked) {
     const [index, error] = await archiveIndex();
     if (index) {
-      await load({ kind: 'archive', ...linked, actuals: null }, index);
+      const { focus, ...range } = linked;
+      await load({ kind: 'archive', ...range, actuals: null }, index, focus);
       return;
     }
     notify.error(error ?? '');
