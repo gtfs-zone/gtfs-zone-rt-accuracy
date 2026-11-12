@@ -15,10 +15,10 @@ export const en = {
 
   'load.title': 'Load TIDES data',
   'load.archive': 'From rt-archive.gtfs.zone',
-  'load.feed': 'Feed',
   'load.from': 'From',
   'load.to': 'To',
-  'load.days': '{n} days recorded, {first} to {last}',
+  'load.days':
+    '{n} archived days in range. The archive holds {total} days, {first} to {last}.',
   'load.upload': 'Upload a package',
   'load.package': 'TIDES package (zip, or the files of one package folder)',
   'load.gtfs': 'GTFS zip (optional, for the map and the gps baseline)',
@@ -37,18 +37,28 @@ export const en = {
   'load.scoring': 'Scoring predictions',
   'load.loaded': 'Loaded {label}',
   'load.failed': 'Could not load {label}: {reason}',
+  'load.search': 'Search feeds',
+  'load.noFeeds': 'No feed matches.',
+  'load.feedDays': '{producer}, {n} days, last {last}',
+  'load.dates': 'Dates',
+  'load.full': 'Fully recorded',
+  'load.partial': 'Partly recorded',
+  'load.inRange': 'In range',
+  'load.notRecorded': 'Not recorded',
+  'load.dayInfo':
+    '{trips} trips, {predictions} predictions, {coverage}% recorded',
+  'load.actualsFiles': 'TIDES package with stop_visits',
 
   'slider.play': 'Play',
   'slider.pause': 'Pause',
   'slider.time': 'Map time',
   'slider.vehicles': '{n} vehicles',
   'slider.ghosts': 'Ghosts',
-
-  'filter.route': 'Route {name}',
-  'filter.stop': 'Stop {name}',
-  'filter.vehicle': 'Vehicle {vehicle}',
-  'filter.vehicleTrip': 'Vehicle {vehicle}, trip {trip}',
-  'filter.clear': 'Show everything',
+  'timeline.title': 'Timeline',
+  'timeline.recorded': '{date}: {share}% recorded',
+  'crumb.data': 'Data',
+  'crumb.vehicle': 'Vehicle',
+  'crumb.vehicleTrip': '{vehicle}, trip {trip}',
 
   'report.summary':
     '{trips} trips, {visits} stop visits scored, {samples} samples.',
@@ -63,12 +73,8 @@ export const en = {
   'report.byRoute': 'By route',
   'report.byDate': 'By service date',
   'report.byHour': 'By local hour ({zone})',
-  'report.coverage': 'Recording coverage',
-  'report.noGaps': 'No gaps.',
   'report.gap': 'Gap {from} to {to} ({minutes} min)',
-  'report.recorded': '{date}: recorded {from} to {to}',
   'report.producer': 'Producer',
-  'report.baseline': 'baseline',
   'report.method':
     'Each stop visit is sampled every minute from its first prediction to its actual time. Errors are predicted minus actual, in minutes; a positive bias means late. A sample counts only when every producer had a prediction; coverage is the share of samples where one did.',
   'report.noGps':
@@ -102,7 +108,7 @@ export const en = {
     'schedule, last-stop and gps are simple predictions made in your browser. A good feed beats them.',
   'help.welcome.replay': 'Replay the day',
   'help.welcome.replayText':
-    'Drag the time slider to see where the vehicles were.',
+    'Drag across the timeline in the panel to see where the vehicles were.',
   'help.welcome.start': 'Get started!',
 
   'help.baselines.label': 'Baselines',
@@ -112,13 +118,32 @@ export const en = {
   'help.baselines.lastStop':
     'last-stop: the delay at the last stop the vehicle left, carried to every later stop. Before the trip departs, how late its departure already is.',
   'help.baselines.gps':
-    'gps: the latest vehicle position, at most 5 minutes old, placed on the line through the trip stops, within the stretch the schedule allows at that time (10 min early to 60 min late). Its delay is the time of the fix minus the scheduled time at that point.',
+    'gps: the latest vehicle position, at most 5 minutes old, placed on the line through the trip stops within a window around the schedule (see The gps window). Its delay is the time of the fix minus the scheduled time at that point.',
   'help.baselines.floor': 'No baseline predicts a time before the sample time.',
+
+  'help.gpsWindow.label': 'The gps window',
+  'help.gpsWindow.title': 'The gps window',
+  'help.gpsWindow.why':
+    'A vehicle position alone does not say which part of a trip it belongs to: a loop or an out-and-back route passes the same street twice. The gps baseline only looks for the vehicle where the schedule allows it to be at the time of the fix.',
+  'help.gpsWindow.window':
+    'The window runs from where the schedule had the vehicle 60 minutes before the fix (the vehicle is up to 60 min late) to where it will have it 10 minutes after (up to 10 min early).',
+  'help.gpsWindow.edges':
+    'The fix is placed on the nearest point of the trip line inside the window. A vehicle further off than the window allows is placed at its edge.',
+  'help.gpsWindow.delay':
+    'The delay is the time of the fix minus the scheduled time at that point, interpolated between stops.',
+  'help.gpsWindow.origin':
+    'Within 50 m of the first stop the trip counts as not yet departed: the delay is how late its departure already is, never negative.',
+  'help.gpsWindow.age':
+    'Only the latest fix is used, and only while it is at most 5 minutes old.',
+  'help.gpsWindow.scheduled': 'scheduled now',
+  'help.gpsWindow.fix': 'fix',
+  'help.gpsWindow.late': '60 min late',
+  'help.gpsWindow.early': '10 min early',
 
   'help.ghosts.label': 'Ghosts',
   'help.ghosts.title': 'Ghost vehicles',
   'help.ghosts.text':
-    'Turn on a producer under the time slider to draw a ghost for each vehicle: a ring where the delay that producer gives at the next stop puts the vehicle on the line through the trip stops. A dashed line joins it to the real vehicle. Baselines have dashed rings.',
+    'Turn on a producer in the timeline to draw a ghost for each vehicle: a ring where the delay that producer gives at the next stop puts the vehicle on the line through the trip stops. A dashed line joins it to the real vehicle. Baselines have dashed rings.',
   'help.ghosts.filter':
     'Click a route, stop or vehicle to narrow the scores and the ghosts to it. Click empty map to show everything again.',
 

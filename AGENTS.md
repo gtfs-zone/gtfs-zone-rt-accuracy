@@ -31,8 +31,9 @@ gtfs-zone-infra.
 - `src/worker/`: fetches, unzips and parses packages and runs the scorer off
   the main thread. `protocol.ts` is the message contract.
 - `src/index.ts`: the shell (map + panel, from gtfs-zone-web-common), the load
-  dialog, the GTFS snapshot for the map and the gps baseline, and the time
-  slider that places `vehicle_locations` on the map.
+  dialog, the GTFS snapshot for the map and the gps baseline, and the panel
+  timeline (`modules/timeline.ts`, data from `metrics/timeline.ts`) that
+  places `vehicle_locations` on the map.
 
 ## Conventions
 

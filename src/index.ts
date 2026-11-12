@@ -41,8 +41,9 @@ import {
   fetchArchiveIndex,
   type ArchiveIndex,
 } from './modules/archive-index';
-import { GhostToggles } from './modules/ghost-toggles';
+import { timelineDays } from './metrics/timeline';
 import {
+  hashFor,
   readHash,
   writeHash,
   type ArchiveSelection,
@@ -54,7 +55,7 @@ import { resizeHorizonChart } from './modules/horizon-chart';
 import { DOCK_ICONS, NAVBAR_ACTIONS } from './modules/navbar-action-list';
 import { isBaseline, producerColor } from './modules/producer-colors';
 import { ReportView, type ReportViewState } from './modules/report-view';
-import { TimeSlider } from './modules/time-slider';
+import { Timeline } from './modules/timeline';
 import type {
   FixColumns,
   RequestBody,
@@ -110,7 +111,17 @@ document
 // ─── Panel ────────────────────────────────────────────────────────────────────
 
 const panel = document.getElementById('panel-content')!;
-const reportView = new ReportView(panel);
+panel.innerHTML = `<div class="flex flex-col gap-4">
+  <div id="report-head"></div>
+  <div id="timeline"></div>
+  <div id="report-body"></div>
+</div>`;
+const reportBody = document.getElementById('report-body')!;
+const reportView = new ReportView(
+  document.getElementById('report-head')!,
+  reportBody,
+  (focus) => hashFor(selection, focus) || '#'
+);
 
 function storedMetric(): Metric {
   try {
@@ -142,15 +153,13 @@ reportView.onMetric = (next) => {
   render({ metric });
 };
 
-reportView.onRoute = (routeId) => select({ type: 'route', route_id: routeId });
-reportView.onClearFilter = () => select({ type: 'home' });
-reportView.onSeek = (time) => slider.seek(time);
+reportView.onNavigate = (focus) => select(focus);
 
 themeController.onThemeChange(() => {
   mapCtrl.refreshAccentColor();
   // Series colors have their own light and dark steps.
   render({});
-  ghostToggles.render(fullReport?.producers ?? []);
+  timeline.redraw();
   drawGhosts();
 });
 new ResizeObserver(() => {
@@ -161,22 +170,23 @@ new ResizeObserver(() => {
 }).observe(panel);
 
 function renderEmpty(): void {
-  panel.innerHTML = `
+  document.getElementById('report-head')!.innerHTML = '';
+  timeline.setData(null);
+  reportBody.innerHTML = `
     <section class="space-y-3 text-sm">
       <h1 class="text-lg font-semibold">${t('help.welcome.title')}</h1>
       <p>${t('help.welcome.lede')}</p>
       <p>${t('help.welcome.loadText')}</p>
       <button class="btn btn-primary btn-sm" data-empty-load>${t('nav.load')}</button>
     </section>`;
-  panel
+  reportBody
     .querySelector('[data-empty-load]')
     ?.addEventListener('click', () => void openLoad());
 }
 
 // ─── Map time ─────────────────────────────────────────────────────────────────
 
-const slider = new TimeSlider();
-const ghostToggles = new GhostToggles();
+const timeline = new Timeline(document.getElementById('timeline')!);
 let fixes: FixColumns | null = null;
 
 function lowerBound(values: Float64Array, x: number): number {
@@ -218,17 +228,13 @@ function vehiclesAt(time: number): AccuracyVehicle[] {
   }));
 }
 
-slider.onChange = (time) => {
+timeline.onChange = (time) => {
   const vehicles = vehiclesAt(time);
-  slider.setVehicleCount(vehicles.length);
+  timeline.setVehicleCount(vehicles.length);
   mapCtrl.showVehicles(vehicles);
-  mapCtrl.setActiveRoutes([
-    ...new Set(vehicles.flatMap((v) => (v.routeId ? [v.routeId] : []))),
-  ]);
-  reportView.setTime(time);
   requestGhosts();
 };
-ghostToggles.onChange = () => requestGhosts();
+timeline.onGhosts = () => requestGhosts();
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
 
@@ -361,7 +367,7 @@ function drawGhosts(): void {
 
 /** Ask for the ghosts at the slider time; one request runs at a time. */
 function requestGhosts(): void {
-  const producers = ghostToggles.enabled();
+  const producers = timeline.enabledGhosts();
   const seq = ++ghostSeq;
   if (!worker || !fullReport || !fixes || producers.length === 0) {
     ghosts = [];
@@ -376,7 +382,7 @@ function requestGhosts(): void {
   const w = worker;
   call(w, {
     type: 'ghosts',
-    time: slider.time,
+    time: timeline.current,
     producers,
     maxAge: CONFIG.FIX_MAX_AGE_S,
     filter: scoreFilter(filter),
@@ -450,13 +456,12 @@ async function load(
   ghosts = [];
   ghostBusy = false;
   ghostAgain = false;
-  ghostToggles.render([]);
-  slider.hide();
+  timeline.setProducers([]);
+  timeline.setData(null);
   mapCtrl.clearVehicles();
   mapCtrl.showGhosts([]);
   view = {
     label,
-    metas: [],
     timeZone: 'UTC',
     status: t('load.progress', { done: 0, total: 1 }),
     report: null,
@@ -501,7 +506,7 @@ async function load(
       return;
     }
     fixes = loaded.fixes;
-    render({ metas: loaded.metas, status: t('load.gtfsLoading') });
+    render({ status: t('load.gtfsLoading') });
 
     let gtfs: GTFSScheduled | null = null;
     try {
@@ -524,8 +529,34 @@ async function load(
     } else {
       mapCtrl.clearScheduledFeed();
     }
-    if (fixes.t.length) {
-      slider.setRange(fixes.t[0], fixes.t[fixes.t.length - 1], timeZone);
+    const spans = loaded.metas.flatMap((m) =>
+      m.coverage.map(
+        (c) =>
+          [Date.parse(c.start) / 1000, Date.parse(c.end) / 1000] as [
+            number,
+            number,
+          ]
+      )
+    );
+    const days = timelineDays(
+      fixes.t,
+      fixes.vehicle,
+      fixes.trip,
+      spans,
+      timeZone,
+      CONFIG.TIMELINE_BIN_S
+    );
+    if (days.length) {
+      const ends = fixes.t.length
+        ? [fixes.t[0], fixes.t[fixes.t.length - 1]]
+        : [Math.min(...spans.flat()), Math.max(...spans.flat())];
+      timeline.setData({
+        days,
+        zone: timeZone,
+        binS: CONFIG.TIMELINE_BIN_S,
+        start: ends[0],
+        end: ends[1],
+      });
     }
     render({ timeZone, feed: gtfs, status: t('load.scoring') });
 
@@ -538,7 +569,7 @@ async function load(
     }
     fullReport = scored.report;
     render({ report: scored.report, status: null, gpsMissing: !gtfs });
-    ghostToggles.render(scored.report.producers);
+    timeline.setProducers(scored.report.producers);
     notify.success(t('load.loaded', { label }));
     if (filter.type !== 'home') {
       select(filter);

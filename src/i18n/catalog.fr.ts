@@ -18,10 +18,10 @@ export const fr: Translation<typeof en> = {
 
   'load.title': 'Charger des données TIDES',
   'load.archive': 'Depuis rt-archive.gtfs.zone',
-  'load.feed': 'Flux',
   'load.from': 'Du',
   'load.to': 'Au',
-  'load.days': '{n} jours enregistrés, du {first} au {last}',
+  'load.days':
+    '{n} jours archivés dans la période. L’archive compte {total} jours, du {first} au {last}.',
   'load.upload': 'Téléverser un paquet',
   'load.package': 'Paquet TIDES (zip, ou les fichiers du dossier d’un paquet)',
   'load.gtfs': 'Zip GTFS (facultatif, pour la carte et la référence gps)',
@@ -42,18 +42,28 @@ export const fr: Translation<typeof en> = {
   'load.scoring': 'Évaluation des prédictions',
   'load.loaded': '{label} chargé',
   'load.failed': 'Impossible de charger {label} : {reason}',
+  'load.search': 'Rechercher des flux',
+  'load.noFeeds': 'Aucun flux ne correspond.',
+  'load.feedDays': '{producer}, {n} jours, dernier {last}',
+  'load.dates': 'Dates',
+  'load.full': 'Entièrement enregistré',
+  'load.partial': 'Partiellement enregistré',
+  'load.inRange': 'Dans la période',
+  'load.notRecorded': 'Non enregistré',
+  'load.dayInfo':
+    '{trips} courses, {predictions} prédictions, {coverage} % enregistré',
+  'load.actualsFiles': 'Paquet TIDES avec stop_visits',
 
   'slider.play': 'Lecture',
   'slider.pause': 'Pause',
   'slider.time': 'Heure de la carte',
   'slider.vehicles': '{n} véhicules',
   'slider.ghosts': 'Fantômes',
-
-  'filter.route': 'Ligne {name}',
-  'filter.stop': 'Arrêt {name}',
-  'filter.vehicle': 'Véhicule {vehicle}',
-  'filter.vehicleTrip': 'Véhicule {vehicle}, course {trip}',
-  'filter.clear': 'Tout afficher',
+  'timeline.title': 'Frise',
+  'timeline.recorded': '{date} : {share} % enregistré',
+  'crumb.data': 'Données',
+  'crumb.vehicle': 'Véhicule',
+  'crumb.vehicleTrip': '{vehicle}, course {trip}',
 
   'report.summary':
     '{trips} courses, {visits} passages évalués, {samples} échantillons.',
@@ -68,12 +78,8 @@ export const fr: Translation<typeof en> = {
   'report.byRoute': 'Par ligne',
   'report.byDate': 'Par date de service',
   'report.byHour': 'Par heure locale ({zone})',
-  'report.coverage': 'Couverture de l’enregistrement',
-  'report.noGaps': 'Aucune interruption.',
   'report.gap': 'Interruption de {from} à {to} ({minutes} min)',
-  'report.recorded': '{date} : enregistré de {from} à {to}',
   'report.producer': 'Producteur',
-  'report.baseline': 'référence',
   'report.method':
     'Chaque passage est échantillonné chaque minute, de sa première prédiction à son heure réelle. Les erreurs sont prédit moins réel, en minutes ; un biais positif signifie en retard. Un échantillon ne compte que si chaque producteur avait une prédiction ; la couverture est la part des échantillons où il en avait une.',
   'report.noGps':
@@ -107,7 +113,7 @@ export const fr: Translation<typeof en> = {
     'schedule, last-stop et gps sont des prédictions simples calculées dans votre navigateur. Un bon flux fait mieux.',
   'help.welcome.replay': 'Rejouer la journée',
   'help.welcome.replayText':
-    'Faites glisser le curseur de temps pour voir où étaient les véhicules.',
+    'Faites glisser sur la frise du panneau pour voir où étaient les véhicules.',
   'help.welcome.start': 'Commencer !',
 
   'help.baselines.label': 'Références',
@@ -117,14 +123,33 @@ export const fr: Translation<typeof en> = {
   'help.baselines.lastStop':
     'last-stop : le retard au dernier arrêt quitté par le véhicule, reporté sur tous les arrêts suivants. Avant le départ, le retard déjà pris par le départ.',
   'help.baselines.gps':
-    'gps : la dernière position du véhicule, vieille de 5 minutes au plus, placée sur la ligne qui relie les arrêts de la course, dans le tronçon que l’horaire permet à ce moment (10 min d’avance à 60 min de retard). Son retard est l’heure de la position moins l’heure prévue à cet endroit.',
+    'gps : la dernière position du véhicule, vieille de 5 minutes au plus, placée sur la ligne passant par les arrêts de la course, dans une fenêtre autour de l’horaire (voir La fenêtre gps). Son retard est l’heure de la position moins l’heure prévue à ce point.',
   'help.baselines.floor':
     'Aucune référence ne prédit une heure antérieure à l’heure de l’échantillon.',
+
+  'help.gpsWindow.label': 'La fenêtre gps',
+  'help.gpsWindow.title': 'La fenêtre gps',
+  'help.gpsWindow.why':
+    'Une position seule ne dit pas à quelle partie d’une course elle appartient : une boucle ou une ligne aller-retour passe deux fois par la même rue. La référence gps ne cherche le véhicule que là où l’horaire le permet à l’heure de la position.',
+  'help.gpsWindow.window':
+    'La fenêtre va de l’endroit où l’horaire plaçait le véhicule 60 minutes avant la position (jusqu’à 60 min de retard) à celui où il le place 10 minutes après (jusqu’à 10 min d’avance).',
+  'help.gpsWindow.edges':
+    'La position est placée au point le plus proche de la ligne de la course dans la fenêtre. Un véhicule plus éloigné que la fenêtre ne le permet est placé à son bord.',
+  'help.gpsWindow.delay':
+    'Le retard est l’heure de la position moins l’heure prévue à ce point, interpolée entre les arrêts.',
+  'help.gpsWindow.origin':
+    'À moins de 50 m du premier arrêt, la course compte comme pas encore partie : le retard est celui que son départ a déjà, jamais négatif.',
+  'help.gpsWindow.age':
+    'Seule la dernière position compte, et seulement tant qu’elle a au plus 5 minutes.',
+  'help.gpsWindow.scheduled': 'horaire maintenant',
+  'help.gpsWindow.fix': 'position',
+  'help.gpsWindow.late': '60 min de retard',
+  'help.gpsWindow.early': '10 min d’avance',
 
   'help.ghosts.label': 'Fantômes',
   'help.ghosts.title': 'Véhicules fantômes',
   'help.ghosts.text':
-    'Activez un producteur sous le curseur de temps pour dessiner un fantôme de chaque véhicule : un cercle là où le retard de ce producteur au prochain arrêt place le véhicule sur la ligne qui relie les arrêts de la course. Une ligne pointillée le relie au véhicule réel. Les références ont des cercles pointillés.',
+    'Activez un producteur dans la frise pour dessiner un fantôme pour chaque véhicule : un anneau là où le retard que ce producteur donne au prochain arrêt place le véhicule sur la ligne passant par les arrêts de la course. Une ligne pointillée le relie au vrai véhicule. Les références ont des anneaux pointillés.',
   'help.ghosts.filter':
     'Cliquez sur une ligne, un arrêt ou un véhicule pour y restreindre les scores et les fantômes. Cliquez sur une zone vide de la carte pour tout afficher à nouveau.',
 

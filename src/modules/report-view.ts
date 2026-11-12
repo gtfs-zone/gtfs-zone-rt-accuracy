@@ -1,16 +1,19 @@
-/** The panel: what was loaded, recording coverage, and the scores. */
+/** The panel: a breadcrumb trail over what was loaded, and the scores. */
 
+import {
+  routeCrumb,
+  stopCrumbs,
+  truncateCrumb,
+} from 'gtfs-zone-web-common/gtfs/breadcrumbs';
 import type { GTFSScheduled } from 'gtfs-zone-web-common/gtfs/scheduled';
+import {
+  renderBreadcrumbTrail,
+  type BreadcrumbItem,
+} from 'gtfs-zone-web-common/ui/breadcrumb-trail';
 import { escapeHtml } from 'gtfs-zone-web-common/util/escape-html';
 import { t } from '../i18n/messages';
 import type { MapFocus } from '../map-controller';
 import type { GroupStats, Report } from '../metrics/score';
-import type { PackageMeta } from '../worker/protocol';
-import {
-  coverageTimeline,
-  placeTimelineMarker,
-  timelineClickTime,
-} from './coverage-timeline';
 import { renderHorizonChart } from './horizon-chart';
 import {
   formatMetric,
@@ -24,7 +27,6 @@ import { isBaseline, producerColor } from './producer-colors';
 
 export interface ReportViewState {
   label: string;
-  metas: PackageMeta[];
   timeZone: string;
   /** Set while loading or scoring. */
   status: string | null;
@@ -43,10 +45,7 @@ function swatch(producer: string, recorded: string[]): string {
   const line = dashed
     ? `<line x1="1" y1="5" x2="15" y2="5" stroke="${color}" stroke-width="2" stroke-dasharray="4 3"/>`
     : `<line x1="1" y1="5" x2="15" y2="5" stroke="${color}" stroke-width="2"/>`;
-  const tag = dashed
-    ? ` <span class="opacity-60">(${t('report.baseline')})</span>`
-    : '';
-  return `<span class="inline-flex items-center gap-1 whitespace-nowrap"><svg width="16" height="10" aria-hidden="true">${line}</svg>${escapeHtml(producer)}${tag}</span>`;
+  return `<span class="inline-flex items-center gap-1 whitespace-nowrap"><svg width="16" height="10" aria-hidden="true">${line}</svg>${escapeHtml(producer)}</span>`;
 }
 
 function section(title: string, body: string): string {
@@ -99,32 +98,39 @@ function breakdown(
   );
 }
 
-function filterText(filter: MapFocus, feed: GTFSScheduled | null): string {
+/** The loaded data, then what the scores are narrowed to. */
+function trail(state: ReportViewState): BreadcrumbItem<MapFocus>[] {
+  const root: BreadcrumbItem<MapFocus> = {
+    typeLabel: t('crumb.data'),
+    label: truncateCrumb(state.label),
+    pageState: { type: 'home' },
+  };
+  const { filter, feed } = state;
   switch (filter.type) {
-    case 'route': {
-      const r = feed?.routes.get(filter.route_id);
-      return t('filter.route', {
-        name: r?.short_name || r?.long_name || filter.route_id,
-      });
-    }
+    case 'route':
+      return [root, routeCrumb(feed, filter.route_id)];
     case 'stop':
-      return t('filter.stop', {
-        name: feed?.stops.get(filter.stop_id)?.name || filter.stop_id,
-      });
-    case 'vehicle':
-      return filter.tripKey
-        ? t('filter.vehicleTrip', {
-            vehicle: filter.key,
-            trip: filter.tripKey.slice(filter.tripKey.indexOf('|') + 1),
-          })
-        : t('filter.vehicle', { vehicle: filter.key });
+      return [root, ...stopCrumbs(feed, filter.stop_id)];
+    case 'vehicle': {
+      const trip = filter.tripKey.slice(filter.tripKey.indexOf('|') + 1);
+      const routeId = trip ? feed?.trips.get(trip)?.route_id : undefined;
+      return [
+        root,
+        ...(routeId ? [routeCrumb(feed, routeId)] : []),
+        {
+          typeLabel: t('crumb.vehicle'),
+          label: truncateCrumb(
+            trip
+              ? t('crumb.vehicleTrip', { vehicle: filter.key, trip })
+              : filter.key
+          ),
+          pageState: filter,
+        },
+      ];
+    }
     default:
-      return '';
+      return [root];
   }
-}
-
-function filterChip(filter: MapFocus, feed: GTFSScheduled | null): string {
-  return `<div class="flex items-center gap-2"><span class="badge badge-primary badge-outline gap-1 h-auto py-0.5">${escapeHtml(filterText(filter, feed))}<button class="btn btn-ghost btn-xs btn-circle -mr-2" data-clear-filter aria-label="${t('filter.clear')}" title="${t('filter.clear')}"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span></div>`;
 }
 
 function overall(report: Report): string {
@@ -151,67 +157,51 @@ function metricPicker(metric: Metric): string {
 export class ReportView {
   /** Called when the reader picks another metric. */
   onMetric: ((metric: Metric) => void) | null = null;
-  /** Called when a By route row is clicked. */
-  onRoute: ((routeId: string) => void) | null = null;
-  /** Called when the filter chip is cleared. */
-  onClearFilter: (() => void) | null = null;
-  /** Called with the time under a click on the coverage timeline. */
-  onSeek: ((time: number) => void) | null = null;
-  private time: number | null = null;
+  /** Called when a By route row or a breadcrumb is clicked. */
+  onNavigate: ((focus: MapFocus) => void) | null = null;
 
-  constructor(private el: HTMLElement) {
-    el.addEventListener('click', (e) => {
+  /**
+   * `head` gets the trail and status, `body` the scores. `href` gives a
+   * crumb's link, for clicks that open it elsewhere.
+   */
+  constructor(
+    private head: HTMLElement,
+    private body: HTMLElement,
+    private href: (focus: MapFocus) => string
+  ) {
+    const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       const btn = target.closest<HTMLElement>('[data-metric]');
       if (btn?.dataset.metric) {
         this.onMetric?.(btn.dataset.metric as Metric);
         return;
       }
-      if (target.closest('[data-clear-filter]')) {
-        this.onClearFilter?.();
+      const crumb = target.closest<HTMLElement>('[data-nav]');
+      if (crumb?.dataset.nav) {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) {
+          return;
+        }
+        e.preventDefault();
+        this.onNavigate?.(JSON.parse(crumb.dataset.nav) as MapFocus);
         return;
       }
       const row = target.closest<HTMLElement>('[data-route]');
       if (row?.dataset.route) {
-        this.onRoute?.(row.dataset.route);
-        return;
+        this.onNavigate?.({ type: 'route', route_id: row.dataset.route });
       }
-      const time = timelineClickTime(e);
-      if (time !== null) {
-        this.onSeek?.(time);
-      }
-    });
-  }
-
-  /** Move the coverage timeline's marker to the slider time. */
-  setTime(time: number | null): void {
-    this.time = time;
-    if (time !== null) {
-      placeTimelineMarker(this.el, time);
-    }
+    };
+    head.addEventListener('click', onClick);
+    body.addEventListener('click', onClick);
   }
 
   render(state: ReportViewState): void {
-    const parts: string[] = [
-      `<h2 class="text-lg font-semibold">${escapeHtml(state.label)}</h2>`,
-    ];
-    if (state.status) {
-      parts.push(
-        `<p class="flex items-center gap-2 text-sm"><span class="loading loading-spinner loading-xs"></span>${escapeHtml(state.status)}</p>`
-      );
-    }
-    if (state.metas.length) {
-      parts.push(
-        section(
-          t('report.coverage'),
-          coverageTimeline(state.metas, state.timeZone)
-        )
-      );
-    }
+    const status = state.status
+      ? `<p class="flex items-center gap-2 text-sm"><span class="loading loading-spinner loading-xs"></span>${escapeHtml(state.status)}</p>`
+      : '';
+    this.head.innerHTML = `<div class="flex flex-col gap-2">${renderBreadcrumbTrail(trail(state), this.href)}${status}</div>`;
+
+    const parts: string[] = [];
     const filter = state.filter;
-    if (filter.type !== 'home') {
-      parts.push(filterChip(filter, state.feed));
-    }
     const r = state.report;
     if (r) {
       parts.push(
@@ -269,11 +259,10 @@ export class ReportView {
         );
       }
     }
-    this.el.innerHTML = `<div class="flex flex-col gap-4">${parts.join('')}</div>`;
-    const chartEl = this.el.querySelector<HTMLElement>('#horizon-chart');
+    this.body.innerHTML = `<div class="flex flex-col gap-4">${parts.join('')}</div>`;
+    const chartEl = this.body.querySelector<HTMLElement>('#horizon-chart');
     if (r && chartEl) {
       renderHorizonChart(chartEl, r, state.metric, formatMetric(state.metric));
     }
-    this.setTime(this.time);
   }
 }

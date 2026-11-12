@@ -18,10 +18,10 @@ export const de: Translation<typeof en> = {
 
   'load.title': 'TIDES-Daten laden',
   'load.archive': 'Aus rt-archive.gtfs.zone',
-  'load.feed': 'Feed',
   'load.from': 'Von',
   'load.to': 'Bis',
-  'load.days': '{n} Tage aufgezeichnet, vom {first} bis {last}',
+  'load.days':
+    '{n} archivierte Tage im Zeitraum. Das Archiv umfasst {total} Tage, vom {first} bis {last}.',
   'load.upload': 'Paket hochladen',
   'load.package': 'TIDES-Paket (Zip oder die Dateien eines Paketordners)',
   'load.gtfs': 'GTFS-Zip (optional, für die Karte und die gps-Referenz)',
@@ -42,18 +42,28 @@ export const de: Translation<typeof en> = {
   'load.scoring': 'Prognosen werden bewertet',
   'load.loaded': '{label} geladen',
   'load.failed': '{label} konnte nicht geladen werden: {reason}',
+  'load.search': 'Feeds suchen',
+  'load.noFeeds': 'Kein Feed passt.',
+  'load.feedDays': '{producer}, {n} Tage, zuletzt {last}',
+  'load.dates': 'Daten',
+  'load.full': 'Vollständig aufgezeichnet',
+  'load.partial': 'Teilweise aufgezeichnet',
+  'load.inRange': 'Im Zeitraum',
+  'load.notRecorded': 'Nicht aufgezeichnet',
+  'load.dayInfo':
+    '{trips} Fahrten, {predictions} Prognosen, {coverage} % aufgezeichnet',
+  'load.actualsFiles': 'TIDES-Paket mit stop_visits',
 
   'slider.play': 'Abspielen',
   'slider.pause': 'Pause',
   'slider.time': 'Kartenzeit',
   'slider.vehicles': '{n} Fahrzeuge',
   'slider.ghosts': 'Geister',
-
-  'filter.route': 'Linie {name}',
-  'filter.stop': 'Haltestelle {name}',
-  'filter.vehicle': 'Fahrzeug {vehicle}',
-  'filter.vehicleTrip': 'Fahrzeug {vehicle}, Fahrt {trip}',
-  'filter.clear': 'Alles anzeigen',
+  'timeline.title': 'Zeitleiste',
+  'timeline.recorded': '{date}: {share} % aufgezeichnet',
+  'crumb.data': 'Daten',
+  'crumb.vehicle': 'Fahrzeug',
+  'crumb.vehicleTrip': '{vehicle}, Fahrt {trip}',
 
   'report.summary':
     '{trips} Fahrten, {visits} Halte bewertet, {samples} Stichproben.',
@@ -68,12 +78,8 @@ export const de: Translation<typeof en> = {
   'report.byRoute': 'Nach Linie',
   'report.byDate': 'Nach Betriebstag',
   'report.byHour': 'Nach Ortszeit-Stunde ({zone})',
-  'report.coverage': 'Abdeckung der Aufzeichnung',
-  'report.noGaps': 'Keine Lücken.',
   'report.gap': 'Lücke von {from} bis {to} ({minutes} min)',
-  'report.recorded': '{date}: aufgezeichnet von {from} bis {to}',
   'report.producer': 'Erzeuger',
-  'report.baseline': 'Referenz',
   'report.method':
     'Jeder Halt wird jede Minute von seiner ersten Prognose bis zu seiner Ist-Zeit abgetastet. Fehler sind Prognose minus Ist-Zeit, in Minuten; ein positiver Bias bedeutet verspätet. Eine Stichprobe zählt nur, wenn jeder Erzeuger eine Prognose hatte; die Abdeckung ist der Anteil der Stichproben, in denen er eine hatte.',
   'report.noGps':
@@ -108,7 +114,7 @@ export const de: Translation<typeof en> = {
     'schedule, last-stop und gps sind einfache Prognosen, die in Ihrem Browser berechnet werden. Ein guter Feed schlägt sie.',
   'help.welcome.replay': 'Den Tag nachspielen',
   'help.welcome.replayText':
-    'Ziehen Sie den Zeitregler, um zu sehen, wo die Fahrzeuge waren.',
+    'Ziehe über die Zeitleiste im Panel, um zu sehen, wo die Fahrzeuge waren.',
   'help.welcome.start': 'Los geht’s!',
 
   'help.baselines.label': 'Referenzen',
@@ -118,14 +124,33 @@ export const de: Translation<typeof en> = {
   'help.baselines.lastStop':
     'last-stop: die Verspätung an der letzten Haltestelle, die das Fahrzeug verlassen hat, übertragen auf alle folgenden Haltestellen. Vor Fahrtbeginn die bereits bestehende Verspätung der Abfahrt.',
   'help.baselines.gps':
-    'gps: die letzte Fahrzeugposition, höchstens 5 Minuten alt, projiziert auf die Linie durch die Haltestellen der Fahrt, innerhalb des Abschnitts, den der Fahrplan zu dieser Zeit zulässt (10 min zu früh bis 60 min zu spät). Ihre Verspätung ist die Zeit der Position minus der Fahrplanzeit an dieser Stelle.',
+    'gps: die letzte Fahrzeugposition, höchstens 5 Minuten alt, auf die Linie durch die Haltestellen der Fahrt gelegt, innerhalb eines Fensters um den Fahrplan (siehe Das gps-Fenster). Ihre Verspätung ist die Zeit der Position minus die Fahrplanzeit an diesem Punkt.',
   'help.baselines.floor':
     'Keine Referenz prognostiziert eine Zeit vor dem Zeitpunkt der Stichprobe.',
+
+  'help.gpsWindow.label': 'Das gps-Fenster',
+  'help.gpsWindow.title': 'Das gps-Fenster',
+  'help.gpsWindow.why':
+    'Eine Fahrzeugposition allein sagt nicht, zu welchem Teil einer Fahrt sie gehört: Eine Schleife oder eine Linie mit Hin- und Rückweg fährt dieselbe Strasse zweimal. Die gps-Referenz sucht das Fahrzeug nur dort, wo der Fahrplan es zur Zeit der Position erlaubt.',
+  'help.gpsWindow.window':
+    'Das Fenster reicht von dort, wo der Fahrplan das Fahrzeug 60 Minuten vor der Position hatte (bis zu 60 Min. Verspätung), bis dorthin, wo er es 10 Minuten danach hat (bis zu 10 Min. zu früh).',
+  'help.gpsWindow.edges':
+    'Die Position wird auf den nächsten Punkt der Fahrtlinie innerhalb des Fensters gelegt. Ein Fahrzeug, das weiter weg ist, als das Fenster erlaubt, landet an dessen Rand.',
+  'help.gpsWindow.delay':
+    'Die Verspätung ist die Zeit der Position minus die Fahrplanzeit an diesem Punkt, zwischen den Haltestellen interpoliert.',
+  'help.gpsWindow.origin':
+    'Innerhalb von 50 m der ersten Haltestelle gilt die Fahrt als noch nicht abgefahren: Die Verspätung ist, wie spät ihre Abfahrt schon ist, nie negativ.',
+  'help.gpsWindow.age':
+    'Nur die letzte Position zählt, und nur solange sie höchstens 5 Minuten alt ist.',
+  'help.gpsWindow.scheduled': 'Fahrplan jetzt',
+  'help.gpsWindow.fix': 'Position',
+  'help.gpsWindow.late': '60 Min. spät',
+  'help.gpsWindow.early': '10 Min. früh',
 
   'help.ghosts.label': 'Geister',
   'help.ghosts.title': 'Geisterfahrzeuge',
   'help.ghosts.text':
-    'Schalten Sie unter dem Zeitregler einen Produzenten ein, um für jedes Fahrzeug einen Geist zu zeichnen: einen Ring dort, wo die Verspätung dieses Produzenten an der nächsten Haltestelle das Fahrzeug auf der Linie durch die Haltestellen der Fahrt verortet. Eine gestrichelte Linie verbindet ihn mit dem echten Fahrzeug. Referenzen haben gestrichelte Ringe.',
+    'Schalte in der Zeitleiste einen Produzenten ein, um für jedes Fahrzeug einen Geist zu zeichnen: einen Ring dort, wo die Verspätung, die dieser Produzent an der nächsten Haltestelle angibt, das Fahrzeug auf der Linie durch die Haltestellen der Fahrt platziert. Eine gestrichelte Linie verbindet ihn mit dem echten Fahrzeug. Referenzen haben gestrichelte Ringe.',
   'help.ghosts.filter':
     'Klicken Sie auf eine Linie, eine Haltestelle oder ein Fahrzeug, um die Bewertungen und Geister darauf einzuschränken. Ein Klick auf eine leere Stelle der Karte zeigt wieder alles.',
 

@@ -13,8 +13,10 @@ export const CONFIG = {
 
   /** A vehicle drops off the map this long after its last fix, in seconds. */
   FIX_MAX_AGE_S: 300,
-  /** Slider resolution, in seconds. */
+  /** Timeline seek resolution, in seconds. */
   SLIDER_STEP_S: 30,
+  /** Timeline histogram bin, in seconds. */
+  TIMELINE_BIN_S: 300,
   /** Playback: simulated seconds per tick, and the tick length. */
   PLAY_STEP_S: 30,
   PLAY_TICK_MS: 200,
