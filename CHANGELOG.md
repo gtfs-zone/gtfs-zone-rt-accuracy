@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.0 (2026-11-12)
+
+### Feat
+
+- panel timeline, breadcrumbs, archive calendar, gps window help
+- coverage timeline, map filters, ghost vehicles, route labels, windowed gps baseline
+
 ## v0.3.0 (2026-11-11)
 
 ### Feat
