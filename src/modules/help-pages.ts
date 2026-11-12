@@ -64,6 +64,48 @@ const baselinesPage: HelpPage = {
     <p class="text-sm opacity-70">${t('report.method')}</p>`,
 };
 
+/** The trip line with the stretch a gps fix may snap to shaded. */
+function gpsWindowDiagram(): string {
+  const stops = [12, 72, 132, 192, 252, 308]
+    .map((x) => `<circle cx="${x}" cy="40" r="3.5" fill="currentColor"/>`)
+    .join('');
+  const label = (x: number, y: number, text: string, anchor = 'middle') =>
+    `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="10" fill="currentColor" opacity="0.75">${text}</text>`;
+  return `<svg viewBox="0 0 320 76" class="w-full max-w-md" role="img" aria-label="${t('help.gpsWindow.title')}">
+    <rect x="56" y="30" width="170" height="20" rx="3" fill="var(--color-primary)" fill-opacity="0.18"/>
+    <line x1="12" y1="40" x2="308" y2="40" stroke="currentColor" stroke-width="2" opacity="0.6"/>
+    ${stops}
+    <line x1="196" y1="24" x2="196" y2="56" stroke="var(--color-primary)" stroke-width="2"/>
+    ${label(196, 18, t('help.gpsWindow.scheduled'))}
+    <circle cx="120" cy="40" r="6" fill="var(--color-primary)"/>
+    ${label(120, 18, t('help.gpsWindow.fix'))}
+    ${label(56, 66, t('help.gpsWindow.late'), 'start')}
+    ${label(226, 66, t('help.gpsWindow.early'), 'end')}
+    <path d="M290 64 h18 m-5 -4 l5 4 l-5 4" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+  </svg>`;
+}
+
+const gpsWindowPage: HelpPage = {
+  id: 'gps-window',
+  label: t('help.gpsWindow.label'),
+  group: 'Reference',
+  title: t('help.gpsWindow.title'),
+  render: () =>
+    `<div class="space-y-3 text-sm">
+      <p>${t('help.gpsWindow.why')}</p>
+      ${gpsWindowDiagram()}
+      <ul class="list-disc pl-5 space-y-2">${[
+        t('help.gpsWindow.window'),
+        t('help.gpsWindow.edges'),
+        t('help.gpsWindow.delay'),
+        t('help.gpsWindow.origin'),
+        t('help.gpsWindow.age'),
+      ]
+        .map((s) => `<li>${s}</li>`)
+        .join('')}</ul>
+    </div>`,
+};
+
 const ghostsPage: HelpPage = {
   id: 'ghosts',
   label: t('help.ghosts.label'),
@@ -99,6 +141,7 @@ const ABOUT_APP: AboutApp = {
 export const HELP_PAGES: HelpPage[] = [
   welcomePage,
   baselinesPage,
+  gpsWindowPage,
   ghostsPage,
   aboutPage(ABOUT_APP),
 ];

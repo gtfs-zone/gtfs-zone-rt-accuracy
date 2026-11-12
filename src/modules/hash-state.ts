@@ -46,31 +46,38 @@ export function readHash(): LinkState | null {
   return { feed, from, to, focus: readFocus(params) };
 }
 
-/** Replaces the hash; null clears it (uploads have no link). */
+/** The hash for a selection and focus; '' for uploads, which have no link. */
+export function hashFor(
+  selection: ArchiveSelection | null,
+  focus: MapFocus = { type: 'home' }
+): string {
+  if (!selection) {
+    return '';
+  }
+  const params = new URLSearchParams({
+    feed: selection.feed,
+    from: selection.from,
+    to: selection.to,
+  });
+  if (focus.type === 'route') {
+    params.set('route', focus.route_id);
+  } else if (focus.type === 'stop') {
+    params.set('stop', focus.stop_id);
+  } else if (focus.type === 'vehicle') {
+    params.set('vehicle', focus.key);
+    params.set('trip', focus.tripKey);
+  }
+  return `#${params}`;
+}
+
+/** Replaces the hash; null clears it. */
 export function writeHash(
   selection: ArchiveSelection | null,
   focus: MapFocus = { type: 'home' }
 ): void {
-  let hash = '';
-  if (selection) {
-    const params = new URLSearchParams({
-      feed: selection.feed,
-      from: selection.from,
-      to: selection.to,
-    });
-    if (focus.type === 'route') {
-      params.set('route', focus.route_id);
-    } else if (focus.type === 'stop') {
-      params.set('stop', focus.stop_id);
-    } else if (focus.type === 'vehicle') {
-      params.set('vehicle', focus.key);
-      params.set('trip', focus.tripKey);
-    }
-    hash = `#${params}`;
-  }
   history.replaceState(
     null,
     '',
-    `${location.pathname}${location.search}${hash}`
+    `${location.pathname}${location.search}${hashFor(selection, focus)}`
   );
 }

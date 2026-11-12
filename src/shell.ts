@@ -5,12 +5,10 @@
 
 import { mountAppShell } from 'gtfs-zone-web-common/ui/app-shell';
 import { t } from './i18n/messages';
-import { renderTimeSlider } from './modules/time-slider';
 
 mountAppShell({
   brandPrefix: 'accuracy',
   brandSuffix: '.rt.gtfs.zone',
-  mapControlsExtra: renderTimeSlider(),
   panelPlaceholder: t('shell.noData'),
   dock: [
     { id: 'dock-browse', label: t('shell.browse'), active: true },
@@ -18,5 +16,5 @@ mountAppShell({
   ],
 });
 
-// The map search has nothing to search here; the time slider takes its place.
+// The map search has nothing to search here.
 document.getElementById('map-search-card')?.classList.add('hidden');
