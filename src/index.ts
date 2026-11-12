@@ -409,16 +409,16 @@ async function loadGtfs(
   choice: LoadChoice,
   url: string | null
 ): Promise<GTFSScheduled | null> {
-  const feed = new GTFSScheduled();
+  // Every trip stays on the main thread for the report; stop_times only as
+  // stop lists, for route geometry where the feed has no shapes.
+  const options = { mirror: 'trips', stopTimes: 'patterns' } as const;
   if (choice.kind === 'upload' && choice.gtfs) {
-    await feed.loadFromFile(choice.gtfs);
-    return feed;
+    return GTFSScheduled.load({ file: choice.gtfs }, options);
   }
   if (!url) {
     return null;
   }
-  await feed.loadFromUrl(url);
-  return feed;
+  return GTFSScheduled.load({ url }, options);
 }
 
 function describe(choice: LoadChoice): string {
@@ -451,7 +451,10 @@ async function load(
   worker = w;
   fixes = null;
   fullReport = null;
+  // The old schedule's worker goes before the new one is built.
+  gtfsFeed?.release();
   gtfsFeed = null;
+  mapCtrl.clearScheduledFeed();
   filter = focus;
   ghosts = [];
   ghostBusy = false;
@@ -520,6 +523,7 @@ async function load(
       );
     }
     if (gen !== generation) {
+      gtfs?.release();
       return;
     }
     const timeZone = gtfs?.agencies[0]?.timezone || 'UTC';
