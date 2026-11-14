@@ -37,6 +37,8 @@ export const fr: Translation<typeof en> = {
     'La période doit aller vers l’avant et couvrir au plus {max} jours.',
   'load.progress': 'Chargement des paquets {done}/{total}',
   'load.gtfsLoading': 'Chargement de l’instantané GTFS',
+  'load.gtfsProgress': 'Chargement de l’instantané GTFS - {file} {bytes}',
+  'load.gtfsIndexing': 'Indexation de l’instantané GTFS',
   'load.gtfsFailed':
     'Pas d’instantané GTFS : {reason}. La référence gps est ignorée.',
   'load.scoring': 'Évaluation des prédictions',

@@ -37,6 +37,8 @@ export const de: Translation<typeof en> = {
     'Der Zeitraum muss vorwärts laufen und darf höchstens {max} Tage umfassen.',
   'load.progress': 'Pakete werden geladen {done}/{total}',
   'load.gtfsLoading': 'GTFS-Momentaufnahme wird geladen',
+  'load.gtfsProgress': 'GTFS-Momentaufnahme wird geladen - {file} {bytes}',
+  'load.gtfsIndexing': 'GTFS-Momentaufnahme wird indiziert',
   'load.gtfsFailed':
     'Keine GTFS-Momentaufnahme: {reason}. Die gps-Referenz entfällt.',
   'load.scoring': 'Prognosen werden bewertet',
