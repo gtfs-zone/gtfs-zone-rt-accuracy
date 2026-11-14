@@ -15,6 +15,3 @@ mountAppShell({
     { id: 'dock-help', label: t('shell.help') },
   ],
 });
-
-// The map search has nothing to search here.
-document.getElementById('map-search-card')?.classList.add('hidden');

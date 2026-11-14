@@ -16,6 +16,8 @@ export const de: Translation<typeof en> = {
   'nav.guide': 'Anleitung',
   'nav.load': 'Laden',
 
+  'search.vehicles': 'Fahrzeuge',
+
   'load.archive': 'Aus rt-archive.gtfs.zone',
   'load.from': 'Von',
   'load.to': 'Bis',

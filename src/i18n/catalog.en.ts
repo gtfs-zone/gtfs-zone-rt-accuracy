@@ -13,6 +13,8 @@ export const en = {
   'nav.guide': 'Guide',
   'nav.load': 'Load',
 
+  'search.vehicles': 'Vehicles',
+
   'load.archive': 'From rt-archive.gtfs.zone',
   'load.from': 'From',
   'load.to': 'To',
