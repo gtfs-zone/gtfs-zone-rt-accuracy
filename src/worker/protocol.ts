@@ -1,7 +1,6 @@
 /** Messages between the page and `accuracy.worker.ts`. */
 
 import type { Ghost } from '../metrics/ghosts';
-import type { FixColumns } from '../metrics/dataset';
 import type { Report, ScoreFilter } from '../metrics/score';
 
 /** One TIDES package: a day from the archive, or uploaded files. */
@@ -24,7 +23,18 @@ export interface PackageMeta {
   gtfs: string | null;
 }
 
-export type { FixColumns } from '../metrics/dataset';
+/** Vehicle fixes as columns, sorted by time, for the map. */
+export interface FixColumns {
+  t: Float64Array;
+  lat: Float64Array;
+  lon: Float64Array;
+  /** NaN when absent. */
+  heading: Float64Array;
+  vehicle: string[];
+  trip: string[];
+  route: string[];
+  serviceDate: string[];
+}
 
 export type RequestBody =
   | { type: 'load'; packages: Source[]; actuals: Source | null }
