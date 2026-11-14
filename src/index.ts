@@ -33,6 +33,11 @@ import {
 } from 'gtfs-zone-web-common/ui/help-pages';
 import { notify } from 'gtfs-zone-web-common/ui/notification-system';
 import {
+  searchPlaces,
+  type PlacePayload,
+} from 'gtfs-zone-web-common/map/place-search';
+import { SearchController } from 'gtfs-zone-web-common/ui/search-controller';
+import {
   PanelResizer,
   restorePanelWidth,
 } from 'gtfs-zone-web-common/ui/panel-resizer';
@@ -74,6 +79,7 @@ import { resizeHorizonChart } from './modules/horizon-chart';
 import { DOCK_ICONS, NAVBAR_ACTIONS } from './modules/navbar-action-list';
 import { isBaseline, producerColor } from './modules/producer-colors';
 import { ReportView, type ReportViewState } from './modules/report-view';
+import { buildSearchGroups } from './modules/search-entries';
 import { Timeline } from './modules/timeline';
 import type {
   RequestBody,
@@ -202,6 +208,23 @@ function renderEmpty(): void {
     ?.addEventListener('click', () => void openLoad());
 }
 
+// ─── Map search ───────────────────────────────────────────────────────────────
+// Selecting a feed object narrows the panel like a map click; a place only
+// moves the map.
+const searchController = new SearchController<MapFocus | PlacePayload>({
+  getGroups: () => buildSearchGroups(gtfsFeed, frameVehicles),
+  getRemoteEntries: (query, signal) =>
+    searchPlaces(query, mapCtrl.getCenter(), signal),
+  onSelect: (payload) => {
+    if ('kind' in payload) {
+      mapCtrl.focusPlace(payload);
+    } else {
+      select(payload);
+    }
+  },
+});
+searchController.initialize();
+
 // ─── Map time ─────────────────────────────────────────────────────────────────
 
 const timeline = new Timeline(document.getElementById('timeline')!);
@@ -325,6 +348,8 @@ async function applyFilter(focus: MapFocus): Promise<void> {
 }
 
 let ghosts: Ghost[] = [];
+/** The vehicles of the last drawn frame, for the map search. */
+let frameVehicles: AccuracyVehicle[] = [];
 let ghostSeq = 0;
 let ghostBusy = false;
 let ghostAgain = false;
@@ -348,6 +373,7 @@ function requestFrame(): void {
   const seq = ++ghostSeq;
   if (!ready || ready !== worker) {
     timeline.setVehicleCount(0);
+    frameVehicles = [];
     mapCtrl.showVehicles([]);
     ghosts = [];
     drawGhosts();
@@ -374,6 +400,7 @@ function requestFrame(): void {
           raw: null,
         }));
         timeline.setVehicleCount(vehicles.length);
+        frameVehicles = vehicles;
         mapCtrl.showVehicles(vehicles);
         ghosts = msg.ghosts;
         drawGhosts();
@@ -522,6 +549,7 @@ async function load(
   ghostAgain = false;
   timeline.setProducers([]);
   timeline.setData(null);
+  frameVehicles = [];
   mapCtrl.clearVehicles();
   mapCtrl.showGhosts([]);
   view = {

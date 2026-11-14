@@ -16,6 +16,8 @@ export const fr: Translation<typeof en> = {
   'nav.guide': 'Guide',
   'nav.load': 'Charger',
 
+  'search.vehicles': 'Véhicules',
+
   'load.archive': 'Depuis rt-archive.gtfs.zone',
   'load.from': 'Du',
   'load.to': 'Au',
