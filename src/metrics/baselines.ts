@@ -11,7 +11,13 @@
  *   GPS_LATE late).
  */
 
-import type { Dataset, Fix, Trip, Visit } from './dataset';
+import {
+  tripFixes,
+  type Dataset,
+  type Fix,
+  type Trip,
+  type Visit,
+} from './dataset';
 
 /** Fixes older than this at sample time give no gps prediction. */
 export const GPS_MAX_AGE = 300;
@@ -270,13 +276,13 @@ export class BaselineCache {
     let b = this.trips.get(trip.key);
     if (!b) {
       const line = this.stops ? stopPolyline(trip, this.stops) : null;
-      const fixes = this.data.fixes.get(trip.key);
+      const n = this.data.tripIndex.get(trip.key);
       b = {
         line,
         lastStop: lastStopSeries(trip),
         gps: this.stops
-          ? line && fixes
-            ? gpsSeries(line, fixes)
+          ? line && n !== undefined
+            ? gpsSeries(line, tripFixes(this.data, n))
             : { t: [], delay: [] }
           : null,
       };

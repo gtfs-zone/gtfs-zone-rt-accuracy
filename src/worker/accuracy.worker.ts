@@ -9,7 +9,12 @@ import { DatasetBuilder, type Dataset } from '../metrics/dataset';
 import { ghostsAt } from '../metrics/ghosts';
 import { score } from '../metrics/score';
 import { streamSource } from './load';
-import type { PackageMeta, Request, ResponseBody } from './protocol';
+import type {
+  FixColumns,
+  PackageMeta,
+  Request,
+  ResponseBody,
+} from './protocol';
 
 let dataset: Dataset | null = null;
 let cache: BaselineCache | null = null;
@@ -44,10 +49,20 @@ async function load(req: Extract<Request, { type: 'load' }>): Promise<void> {
   if (metas.length === 0) {
     throw new Error('no packages for the selection');
   }
-  const built = builder.finish();
-  dataset = built.dataset;
+  dataset = builder.finish();
   cache = new BaselineCache(dataset);
-  const fixes = built.fixes;
+  const f = dataset.fixes;
+  const str = (col: Int32Array) => Array.from(col, (i) => f.strings[i]);
+  const fixes: FixColumns = {
+    t: f.t.slice(),
+    lat: f.lat.slice(),
+    lon: f.lon.slice(),
+    heading: f.heading.slice(),
+    vehicle: str(f.vehicle),
+    trip: str(f.trip),
+    route: str(f.route),
+    serviceDate: str(f.serviceDate),
+  };
   post(id, { type: 'loaded', metas, fixes, predictions }, [
     fixes.t.buffer,
     fixes.lat.buffer,
