@@ -1,7 +1,9 @@
 /**
  * Loads TIDES packages and scores them off the main thread. A `load` keeps
  * the joined dataset; each `score` reuses it, and the trip baselines built
- * while scoring are kept for later scores and for `ghosts`.
+ * while scoring are kept for later scores and for `frame`. The fixes stay
+ * here: the page asks for the vehicles at a time (`frame`) and the timeline
+ * bins (`timeline`) instead of holding them.
  */
 
 import { BaselineCache } from '../metrics/baselines';
@@ -9,15 +11,14 @@ import { DatasetBuilder, type Dataset } from '../metrics/dataset';
 import { ghostsAt } from '../metrics/ghosts';
 import { score } from '../metrics/score';
 import { streamSource } from './load';
-import type {
-  FixColumns,
-  PackageMeta,
-  Request,
-  ResponseBody,
-} from './protocol';
+import { timelineDays } from '../metrics/timeline';
+import { vehiclesAt } from '../metrics/vehicles';
+import type { PackageMeta, Request, ResponseBody } from './protocol';
 
 let dataset: Dataset | null = null;
 let cache: BaselineCache | null = null;
+/** Recorded coverage of the loaded packages, as epoch-second intervals. */
+let spans: [number, number][] = [];
 
 function post(id: number, msg: ResponseBody, transfer: Transferable[] = []) {
   (self as unknown as Worker).postMessage({ ...msg, id }, transfer);
@@ -51,24 +52,36 @@ async function load(req: Extract<Request, { type: 'load' }>): Promise<void> {
   }
   dataset = builder.finish();
   cache = new BaselineCache(dataset);
-  const f = dataset.fixes;
+  spans = metas.flatMap((m) =>
+    m.coverage.map(
+      (c) =>
+        [Date.parse(c.start) / 1000, Date.parse(c.end) / 1000] as [
+          number,
+          number,
+        ]
+    )
+  );
+  post(id, { type: 'loaded', metas, predictions });
+}
+
+function timelineRequest(
+  data: Dataset,
+  req: Extract<Request, { type: 'timeline' }>
+) {
+  const f = data.fixes;
   const str = (col: Int32Array) => Array.from(col, (i) => f.strings[i]);
-  const fixes: FixColumns = {
-    t: f.t.slice(),
-    lat: f.lat.slice(),
-    lon: f.lon.slice(),
-    heading: f.heading.slice(),
-    vehicle: str(f.vehicle),
-    trip: str(f.trip),
-    route: str(f.route),
-    serviceDate: str(f.serviceDate),
-  };
-  post(id, { type: 'loaded', metas, fixes, predictions }, [
-    fixes.t.buffer,
-    fixes.lat.buffer,
-    fixes.lon.buffer,
-    fixes.heading.buffer,
-  ]);
+  const days = timelineDays(
+    f.t,
+    str(f.vehicle),
+    str(f.trip),
+    spans,
+    req.timeZone,
+    req.binS
+  );
+  const [start, end] = f.t.length
+    ? [f.t[0], f.t[f.t.length - 1]]
+    : [Math.min(...spans.flat()), Math.max(...spans.flat())];
+  post(req.id, { type: 'timeline', days, start, end });
 }
 
 function scoreRequest(data: Dataset, req: Extract<Request, { type: 'score' }>) {
@@ -102,9 +115,12 @@ self.onmessage = async (e: MessageEvent<Request>) => {
       throw new Error('nothing loaded');
     } else if (req.type === 'score') {
       scoreRequest(dataset, req);
+    } else if (req.type === 'timeline') {
+      timelineRequest(dataset, req);
     } else {
       post(req.id, {
-        type: 'ghosts',
+        type: 'frame',
+        vehicles: vehiclesAt(dataset, req.time, req.maxAge),
         ghosts: cache
           ? ghostsAt(
               dataset,
