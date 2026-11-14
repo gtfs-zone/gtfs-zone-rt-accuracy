@@ -33,6 +33,8 @@ export const en = {
     'The date range must run forwards and span at most {max} days.',
   'load.progress': 'Loading packages {done}/{total}',
   'load.gtfsLoading': 'Loading the GTFS snapshot',
+  'load.gtfsProgress': 'Loading the GTFS snapshot - {file} {bytes}',
+  'load.gtfsIndexing': 'Indexing the GTFS snapshot',
   'load.gtfsFailed': 'No GTFS snapshot: {reason}. The gps baseline is skipped.',
   'load.scoring': 'Scoring predictions',
   'load.loaded': 'Loaded {label}',

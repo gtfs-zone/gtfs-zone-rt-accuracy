@@ -6,7 +6,12 @@ import {
   syncAutoZoomControl,
   wireAutoZoomControl,
 } from 'gtfs-zone-web-common/map/auto-zoom';
-import { GTFSScheduled } from 'gtfs-zone-web-common/gtfs/scheduled';
+import {
+  GTFSScheduled,
+  type LoadHooks,
+} from 'gtfs-zone-web-common/gtfs/scheduled';
+import { formatBytes } from 'gtfs-zone-web-common/gtfs/feed-download';
+import type { LoadProgress } from 'gtfs-zone-web-common/gtfs/store/store-client';
 import {
   setHelpPages,
   showHelpModal,
@@ -405,20 +410,66 @@ function requestGhosts(): void {
     });
 }
 
+/** GTFS tables accuracy never reads. */
+const SKIP_TABLES = [
+  'calendar_dates',
+  'transfers',
+  'translations',
+  'frequencies',
+  'pathways',
+  'levels',
+  'attributions',
+  'fare_attributes',
+  'fare_rules',
+  'fare_media',
+  'fare_products',
+  'fare_leg_rules',
+  'fare_leg_join_rules',
+  'fare_transfer_rules',
+  'rider_categories',
+  'timeframes',
+  'areas',
+  'stop_areas',
+  'networks',
+  'route_networks',
+  'location_groups',
+  'location_group_stops',
+  'booking_rules',
+];
+
+/** The status line for one GTFS load step. */
+function gtfsProgressText(p: LoadProgress): string {
+  if (p.stage === 'index') {
+    return t('load.gtfsIndexing');
+  }
+  const bytes = p.total
+    ? `${formatBytes(p.bytes)} / ${formatBytes(p.total)}`
+    : formatBytes(p.bytes);
+  return t('load.gtfsProgress', {
+    file: p.table ? `${p.table}.txt` : '',
+    bytes,
+  });
+}
+
 async function loadGtfs(
   choice: LoadChoice,
-  url: string | null
+  url: string | null,
+  hooks: LoadHooks
 ): Promise<GTFSScheduled | null> {
   // Every trip stays on the main thread for the report; stop_times only as
   // stop lists, for route geometry where the feed has no shapes.
-  const options = { mirror: 'trips', stopTimes: 'patterns' } as const;
+  const options = {
+    mirror: 'trips',
+    stopTimes: 'patterns',
+    skipTables: SKIP_TABLES,
+  } as const;
   if (choice.kind === 'upload' && choice.gtfs) {
-    return GTFSScheduled.load({ file: choice.gtfs }, options);
+    return GTFSScheduled.load({ file: choice.gtfs }, options, hooks);
   }
   if (!url) {
     return null;
   }
-  return GTFSScheduled.load({ url }, options);
+  return GTFSScheduled.load({ url }, options, hooks);
 }
 
 function describe(choice: LoadChoice): string {
@@ -433,6 +484,8 @@ function describe(choice: LoadChoice): string {
 }
 
 let generation = 0;
+/** Aborts the GTFS load of a superseded `load`. */
+let gtfsAbort = new AbortController();
 
 async function load(
   choice: LoadChoice,
@@ -440,6 +493,8 @@ async function load(
   focus: MapFocus = { type: 'home' }
 ) {
   const gen = ++generation;
+  gtfsAbort.abort();
+  gtfsAbort = new AbortController();
   const label = describe(choice);
   worker?.terminate();
   const w = new Worker(
@@ -515,12 +570,25 @@ async function load(
     try {
       gtfs = await loadGtfs(
         choice,
-        loaded.metas[loaded.metas.length - 1]?.gtfs ?? null
+        loaded.metas[loaded.metas.length - 1]?.gtfs ?? null,
+        {
+          signal: gtfsAbort.signal,
+          onProgress: (p) => {
+            if (gen === generation) {
+              render({ status: gtfsProgressText(p) });
+            }
+          },
+        }
       );
     } catch (err) {
-      notify.warning(
-        t('load.gtfsFailed', { reason: String((err as Error).message ?? err) })
-      );
+      // A superseded load's GTFS is aborted on purpose.
+      if (gen === generation) {
+        notify.warning(
+          t('load.gtfsFailed', {
+            reason: String((err as Error).message ?? err),
+          })
+        );
+      }
     }
     if (gen !== generation) {
       gtfs?.release();
