@@ -88,19 +88,6 @@ interface PerformedTrip {
   routeId: string;
 }
 
-/** (service_date, trip_id_performed) to the scheduled trip and its route. */
-function performedTrips(tables: PackageTables): Map<string, PerformedTrip> {
-  const out = new Map<string, PerformedTrip>();
-  for (const r of tables.trips_performed) {
-    const performed = r.trip_id_performed ?? '';
-    out.set(tripKey(r.service_date ?? '', performed), {
-      tripId: r.trip_id_scheduled || performed,
-      routeId: r.route_id ?? '',
-    });
-  }
-  return out;
-}
-
 function scheduledTripId(
   r: Row,
   performed: Map<string, PerformedTrip>
@@ -114,27 +101,152 @@ function scheduledTripId(
   return p?.tripId ?? r.trip_id_performed ?? null;
 }
 
-function buildTrips(tables: PackageTables): Map<string, Trip> {
-  const performed = performedTrips(tables);
-  const trips = new Map<string, Trip>();
-  const seen = new Set<string>();
-  for (const r of tables.stop_visits) {
+export type TableName = keyof PackageTables;
+
+/** Tables in the order a package must be fed: lookups before what uses them. */
+export const TABLE_ORDER: readonly TableName[] = [
+  'trips_performed',
+  'stop_visits',
+  'stop_time_predictions',
+  'vehicle_locations',
+];
+
+/** Vehicle fixes as columns, sorted by time, for the map. */
+export interface FixColumns {
+  t: Float64Array;
+  lat: Float64Array;
+  lon: Float64Array;
+  /** NaN when absent. */
+  heading: Float64Array;
+  vehicle: string[];
+  trip: string[];
+  route: string[];
+  serviceDate: string[];
+}
+
+/**
+ * Builds a dataset one package at a time, so a package's rows can be dropped
+ * as soon as they are folded in. Each package is fed table by table in
+ * `TABLE_ORDER`, between `beginPackage` and `endPackage`.
+ *
+ * Predictions and vehicle locations come from `predictions` packages; stop
+ * visits come from the `actuals` package when there is one, else from the
+ * `predictions` packages.
+ */
+export class DatasetBuilder {
+  private trips = new Map<string, Trip>();
+  private predictions = new Map<string, Map<string, PredictionRow[]>>();
+  private fixes = new Map<string, Fix[]>();
+  private producers = new Set<string>();
+  private unresolvedPredictions = 0;
+  private fixRows: {
+    t: number;
+    lat: number;
+    lon: number;
+    heading: number;
+    vehicle: string;
+    trip: string;
+    route: string;
+    serviceDate: string;
+  }[] = [];
+
+  // State of the package being fed.
+  private role: 'predictions' | 'actuals' = 'predictions';
+  private performed = new Map<string, PerformedTrip>();
+  private seqs = new Map<string, number>();
+  private pkgTrips = new Map<string, Trip>();
+  private seen = new Set<string>();
+
+  constructor(private readonly hasActuals: boolean) {}
+
+  beginPackage(role: 'predictions' | 'actuals'): void {
+    this.role = role;
+    this.performed = new Map();
+    this.seqs = new Map();
+    this.pkgTrips = new Map();
+    this.seen = new Set();
+  }
+
+  rows(table: TableName, rows: Row[]): void {
+    switch (table) {
+      case 'trips_performed':
+        return this.tripsPerformed(rows);
+      case 'stop_visits':
+        return this.stopVisits(rows);
+      case 'stop_time_predictions':
+        return this.role === 'predictions'
+          ? this.stopTimePredictions(rows)
+          : undefined;
+      case 'vehicle_locations':
+        return this.role === 'predictions'
+          ? this.vehicleLocations(rows)
+          : undefined;
+    }
+  }
+
+  endPackage(): void {
+    for (const trip of this.pkgTrips.values()) {
+      trip.visits.sort((a, b) => a.seq - b.seq);
+      if (!this.trips.has(trip.key)) {
+        this.trips.set(trip.key, trip);
+      }
+    }
+    this.performed = new Map();
+    this.seqs = new Map();
+    this.pkgTrips = new Map();
+    this.seen = new Set();
+  }
+
+  /** (service_date, trip_id_performed) to the scheduled trip and its route. */
+  private tripsPerformed(rows: Row[]): void {
+    for (const r of rows) {
+      const performed = r.trip_id_performed ?? '';
+      this.performed.set(tripKey(r.service_date ?? '', performed), {
+        tripId: r.trip_id_scheduled || performed,
+        routeId: r.route_id ?? '',
+      });
+    }
+  }
+
+  private stopVisits(rows: Row[]): void {
+    const takeVisits = this.role === 'actuals' || !this.hasActuals;
+    for (const r of rows) {
+      // Predictions written before `scheduled_stop_sequence` was added to
+      // the table resolve it through their own package's stop_visits.
+      if (this.role === 'predictions') {
+        const seq = int(r.scheduled_stop_sequence);
+        if (seq !== null) {
+          this.seqs.set(
+            `${r.service_date}|${r.trip_id_performed}|${r.trip_stop_sequence}`,
+            seq
+          );
+        }
+      }
+      if (takeVisits) {
+        this.visit(r);
+      }
+    }
+  }
+
+  private visit(r: Row): void {
     const serviceDate = r.service_date ?? '';
-    const tripId = scheduledTripId(r, performed);
+    const tripId = scheduledTripId(r, this.performed);
     const seq = int(r.scheduled_stop_sequence) ?? int(r.trip_stop_sequence);
     if (!tripId || seq === null) {
-      continue;
+      return;
     }
     const key = tripKey(serviceDate, tripId);
     const vkey = visitKey(key, seq);
     // Two performed trips on one scheduled trip: the first one wins.
-    if (seen.has(vkey)) {
-      continue;
+    if (this.seen.has(vkey)) {
+      return;
     }
-    seen.add(vkey);
-    let trip = trips.get(key);
+    this.seen.add(vkey);
+    let trip = this.pkgTrips.get(key);
     if (!trip) {
-      const p = performed.get(tripKey(serviceDate, r.trip_id_performed ?? ''));
+      const p = this.performed.get(
+        tripKey(serviceDate, r.trip_id_performed ?? '')
+      );
       trip = {
         key,
         serviceDate,
@@ -142,7 +254,7 @@ function buildTrips(tables: PackageTables): Map<string, Trip> {
         routeId: p?.routeId ?? '',
         visits: [],
       };
-      trips.set(key, trip);
+      this.pkgTrips.set(key, trip);
     }
     trip.visits.push({
       seq,
@@ -153,122 +265,129 @@ function buildTrips(tables: PackageTables): Map<string, Trip> {
       actDep: epoch(r.actual_departure_time),
     });
   }
-  for (const trip of trips.values()) {
-    trip.visits.sort((a, b) => a.seq - b.seq);
-  }
-  return trips;
-}
 
-/**
- * Predictions written before `scheduled_stop_sequence` was added to the
- * table resolve it through their own package's stop_visits.
- */
-function stopSequenceLookup(tables: PackageTables): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const r of tables.stop_visits) {
-    const seq = int(r.scheduled_stop_sequence);
-    if (seq !== null) {
-      out.set(
-        `${r.service_date}|${r.trip_id_performed}|${r.trip_stop_sequence}`,
-        seq
-      );
-    }
-  }
-  return out;
-}
-
-/**
- * Join packages into one dataset. Predictions and vehicle locations come from
- * `packages`; stop visits come from `actuals` when given, else from
- * `packages`.
- */
-export function buildDataset(
-  packages: PackageTables[],
-  actuals?: PackageTables
-): Dataset {
-  const trips = new Map<string, Trip>();
-  for (const tables of actuals ? [actuals] : packages) {
-    for (const [key, trip] of buildTrips(tables)) {
-      if (!trips.has(key)) {
-        trips.set(key, trip);
-      }
-    }
-  }
-
-  const predictions = new Map<string, Map<string, PredictionRow[]>>();
-  const fixes = new Map<string, Fix[]>();
-  const producers = new Set<string>();
-  let unresolvedPredictions = 0;
-
-  for (const tables of packages) {
-    const performed = performedTrips(tables);
-    const seqs = stopSequenceLookup(tables);
-
-    for (const r of tables.stop_time_predictions) {
-      const tripId = scheduledTripId(r, performed);
+  private stopTimePredictions(rows: Row[]): void {
+    for (const r of rows) {
+      const tripId = scheduledTripId(r, this.performed);
       const seq =
         int(r.scheduled_stop_sequence) ??
-        seqs.get(
+        this.seqs.get(
           `${r.service_date}|${r.trip_id_performed}|${r.trip_stop_sequence}`
         ) ??
         null;
       const ts = epoch(r.prediction_timestamp);
       if (!tripId || seq === null || ts === null) {
-        unresolvedPredictions++;
+        this.unresolvedPredictions++;
         continue;
       }
       const producer = r.producer || 'unknown';
-      producers.add(producer);
+      this.producers.add(producer);
       const vkey = visitKey(tripKey(r.service_date ?? '', tripId), seq);
-      let byProducer = predictions.get(vkey);
+      let byProducer = this.predictions.get(vkey);
       if (!byProducer) {
         byProducer = new Map();
-        predictions.set(vkey, byProducer);
+        this.predictions.set(vkey, byProducer);
       }
-      let rows = byProducer.get(producer);
-      if (!rows) {
-        rows = [];
-        byProducer.set(producer, rows);
+      let list = byProducer.get(producer);
+      if (!list) {
+        list = [];
+        byProducer.set(producer, list);
       }
-      rows.push({
+      list.push({
         ts,
         arr: epoch(r.predicted_arrival_time),
         dep: epoch(r.predicted_departure_time),
       });
     }
+  }
 
-    for (const r of tables.vehicle_locations) {
-      const tripId = scheduledTripId(r, performed);
+  private vehicleLocations(rows: Row[]): void {
+    for (const r of rows) {
       const t = epoch(r.event_timestamp);
+      if (t === null || !r.latitude || !r.longitude) {
+        continue;
+      }
       const lat = Number(r.latitude);
       const lon = Number(r.longitude);
-      if (!tripId || t === null || !r.latitude || !r.longitude) {
+      const tripId = scheduledTripId(r, this.performed);
+      const p = this.performed.get(
+        tripKey(r.service_date ?? '', r.trip_id_performed ?? '')
+      );
+      this.fixRows.push({
+        t,
+        lat,
+        lon,
+        heading: r.heading ? Number(r.heading) : NaN,
+        vehicle: r.vehicle_id ?? '',
+        trip: tripId ?? '',
+        route: p?.routeId ?? '',
+        serviceDate: r.service_date ?? '',
+      });
+      if (!tripId) {
         continue;
       }
       const key = tripKey(r.service_date ?? '', tripId);
-      let list = fixes.get(key);
+      let list = this.fixes.get(key);
       if (!list) {
         list = [];
-        fixes.set(key, list);
+        this.fixes.set(key, list);
       }
       list.push({ t, lat, lon, vehicle: r.vehicle_id ?? '' });
     }
   }
 
-  for (const byProducer of predictions.values()) {
-    for (const rows of byProducer.values()) {
-      rows.sort((a, b) => a.ts - b.ts);
+  finish(): { dataset: Dataset; fixes: FixColumns } {
+    for (const byProducer of this.predictions.values()) {
+      for (const list of byProducer.values()) {
+        list.sort((a, b) => a.ts - b.ts);
+      }
     }
+    for (const list of this.fixes.values()) {
+      list.sort((a, b) => a.t - b.t);
+    }
+    const rows = this.fixRows;
+    this.fixRows = [];
+    rows.sort((a, b) => a.t - b.t);
+    return {
+      dataset: {
+        trips: this.trips,
+        predictions: this.predictions,
+        fixes: this.fixes,
+        producers: [...this.producers].sort(),
+        unresolvedPredictions: this.unresolvedPredictions,
+      },
+      fixes: {
+        t: Float64Array.from(rows, (r) => r.t),
+        lat: Float64Array.from(rows, (r) => r.lat),
+        lon: Float64Array.from(rows, (r) => r.lon),
+        heading: Float64Array.from(rows, (r) => r.heading),
+        vehicle: rows.map((r) => r.vehicle),
+        trip: rows.map((r) => r.trip),
+        route: rows.map((r) => r.route),
+        serviceDate: rows.map((r) => r.serviceDate),
+      },
+    };
   }
-  for (const list of fixes.values()) {
-    list.sort((a, b) => a.t - b.t);
-  }
+}
 
-  return {
-    trips,
-    predictions,
-    fixes,
-    producers: [...producers].sort(),
-    unresolvedPredictions,
+/** Join whole packages into one dataset; see `DatasetBuilder`. */
+export function buildDataset(
+  packages: PackageTables[],
+  actuals?: PackageTables
+): Dataset {
+  const builder = new DatasetBuilder(actuals !== undefined);
+  const feed = (tables: PackageTables, role: 'predictions' | 'actuals') => {
+    builder.beginPackage(role);
+    for (const table of TABLE_ORDER) {
+      builder.rows(table, tables[table]);
+    }
+    builder.endPackage();
   };
+  for (const tables of packages) {
+    feed(tables, 'predictions');
+  }
+  if (actuals) {
+    feed(actuals, 'actuals');
+  }
+  return builder.finish().dataset;
 }
