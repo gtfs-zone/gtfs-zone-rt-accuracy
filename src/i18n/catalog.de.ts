@@ -16,7 +16,6 @@ export const de: Translation<typeof en> = {
   'nav.guide': 'Anleitung',
   'nav.load': 'Laden',
 
-  'load.title': 'TIDES-Daten laden',
   'load.archive': 'Aus rt-archive.gtfs.zone',
   'load.from': 'Von',
   'load.to': 'Bis',
@@ -24,15 +23,22 @@ export const de: Translation<typeof en> = {
     '{n} archivierte Tage im Zeitraum. Das Archiv umfasst {total} Tage, vom {first} bis {last}.',
   'load.upload': 'Paket hochladen',
   'load.package': 'TIDES-Paket (Zip oder die Dateien eines Paketordners)',
-  'load.gtfs': 'GTFS-Zip (optional, für die Karte und die gps-Referenz)',
   'load.actuals': 'Ist-Zeiten aus einer anderen Quelle (optional)',
   'load.actualsHint':
     'Ein TIDES-Paket, dessen stop_visits die obigen ersetzen, zugeordnet nach Betriebstag, geplanter Fahrt und Haltestellennummer. Fügen Sie dessen trips_performed hinzu, wenn trip_id_performed von trip_id_scheduled abweicht.',
+  'load.pickPackage': 'Wählen Sie ein TIDES-Paket zum Hochladen.',
+  'load.packageTitle': 'TIDES-Paket',
+  'load.uploadPackage': 'TIDES-Paket hochladen',
+  'load.back': 'Zurück',
+  'load.gtfsPicked': 'Fahrplan: {label}. Das Paket liefert die Prognosen.',
+  'load.gtfsFromMeta':
+    'Das GTFS ist das, welches die datapackage.json des Pakets nennt, falls vorhanden.',
+  'load.gtfsRestored':
+    'GTFS von {label} aus der gespeicherten Kopie wiederhergestellt',
+  'load.storedMissing': 'Dieser gespeicherte Feed ist nicht mehr vorhanden.',
   'load.submit': 'Laden',
   'load.cancel': 'Abbrechen',
   'load.indexFailed': 'Der Archivindex konnte nicht gelesen werden: {reason}',
-  'load.pickPackage':
-    'Wählen Sie ein Paket zum Hochladen oder einen Feed aus dem Archiv.',
   'load.badRange':
     'Der Zeitraum muss vorwärts laufen und darf höchstens {max} Tage umfassen.',
   'load.progress': 'Pakete werden geladen {done}/{total}',
@@ -44,8 +50,6 @@ export const de: Translation<typeof en> = {
   'load.scoring': 'Prognosen werden bewertet',
   'load.loaded': '{label} geladen',
   'load.failed': '{label} konnte nicht geladen werden: {reason}',
-  'load.search': 'Feeds suchen',
-  'load.noFeeds': 'Kein Feed passt.',
   'load.feedDays': '{producer}, {n} Tage, zuletzt {last}',
   'load.dates': 'Daten',
   'load.full': 'Vollständig aufgezeichnet',
