@@ -46,7 +46,6 @@ import {
   fetchArchiveIndex,
   type ArchiveIndex,
 } from './modules/archive-index';
-import { timelineDays } from './metrics/timeline';
 import {
   hashFor,
   readHash,
@@ -62,7 +61,6 @@ import { isBaseline, producerColor } from './modules/producer-colors';
 import { ReportView, type ReportViewState } from './modules/report-view';
 import { Timeline } from './modules/timeline';
 import type {
-  FixColumns,
   RequestBody,
   Response,
   ResponseBody,
@@ -192,54 +190,11 @@ function renderEmpty(): void {
 // ─── Map time ─────────────────────────────────────────────────────────────────
 
 const timeline = new Timeline(document.getElementById('timeline')!);
-let fixes: FixColumns | null = null;
+/** The worker whose dataset is loaded, or null while a load runs. */
+let ready: Worker | null = null;
 
-function lowerBound(values: Float64Array, x: number): number {
-  let lo = 0;
-  let hi = values.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (values[mid] < x) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-  return lo;
-}
-
-/** Each vehicle at its latest fix in (time - FIX_MAX_AGE_S, time]. */
-function vehiclesAt(time: number): AccuracyVehicle[] {
-  if (!fixes) {
-    return [];
-  }
-  const from = lowerBound(fixes.t, time - CONFIG.FIX_MAX_AGE_S);
-  const latest = new Map<string, number>();
-  for (let i = from; i < fixes.t.length && fixes.t[i] <= time; i++) {
-    latest.set(fixes.vehicle[i] || `#${i}`, i);
-  }
-  return [...latest].map(([key, i]) => ({
-    key,
-    vehicleId: fixes!.vehicle[i],
-    entityId: key,
-    lat: fixes!.lat[i],
-    lon: fixes!.lon[i],
-    bearing: Number.isNaN(fixes!.heading[i]) ? undefined : fixes!.heading[i],
-    tripId: fixes!.trip[i] || undefined,
-    routeId: fixes!.route[i] || undefined,
-    timestamp: fixes!.t[i],
-    raw: null,
-    tripKey: fixes!.trip[i] ? `${fixes!.serviceDate[i]}|${fixes!.trip[i]}` : '',
-  }));
-}
-
-timeline.onChange = (time) => {
-  const vehicles = vehiclesAt(time);
-  timeline.setVehicleCount(vehicles.length);
-  mapCtrl.showVehicles(vehicles);
-  requestGhosts();
-};
-timeline.onGhosts = () => requestGhosts();
+timeline.onChange = () => requestFrame();
+timeline.onGhosts = () => requestFrame();
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
 
@@ -325,7 +280,7 @@ function select(focus: MapFocus): void {
 async function applyFilter(focus: MapFocus): Promise<void> {
   filter = focus;
   writeHash(selection, focus);
-  requestGhosts();
+  requestFrame();
   const seq = ++scoreSeq;
   const narrowed = scoreFilter(focus);
   if (!fullReport || !worker) {
@@ -370,11 +325,15 @@ function drawGhosts(): void {
   );
 }
 
-/** Ask for the ghosts at the slider time; one request runs at a time. */
-function requestGhosts(): void {
-  const producers = timeline.enabledGhosts();
+/**
+ * Ask for the vehicles and ghosts at the slider time; one request runs at a
+ * time, and the latest slider time is asked for when it finishes.
+ */
+function requestFrame(): void {
   const seq = ++ghostSeq;
-  if (!worker || !fullReport || !fixes || producers.length === 0) {
+  if (!ready || ready !== worker) {
+    timeline.setVehicleCount(0);
+    mapCtrl.showVehicles([]);
     ghosts = [];
     drawGhosts();
     return;
@@ -384,28 +343,35 @@ function requestGhosts(): void {
     return;
   }
   ghostBusy = true;
-  const w = worker;
+  const w = ready;
   call(w, {
-    type: 'ghosts',
+    type: 'frame',
     time: timeline.current,
-    producers,
+    producers: fullReport ? timeline.enabledGhosts() : [],
     maxAge: CONFIG.FIX_MAX_AGE_S,
     filter: scoreFilter(filter),
   })
     .then((msg) => {
-      if (seq === ghostSeq && w === worker && msg.type === 'ghosts') {
+      if (seq === ghostSeq && w === worker && msg.type === 'frame') {
+        const vehicles: AccuracyVehicle[] = msg.vehicles.map((v) => ({
+          ...v,
+          entityId: v.key,
+          raw: null,
+        }));
+        timeline.setVehicleCount(vehicles.length);
+        mapCtrl.showVehicles(vehicles);
         ghosts = msg.ghosts;
         drawGhosts();
       }
     })
     .catch(() => {
-      // A failed ghost request leaves the last ghosts drawn.
+      // A failed frame request leaves the last frame drawn.
     })
     .finally(() => {
       ghostBusy = false;
       if (ghostAgain) {
         ghostAgain = false;
-        requestGhosts();
+        requestFrame();
       }
     });
 }
@@ -504,7 +470,7 @@ async function load(
     }
   );
   worker = w;
-  fixes = null;
+  ready = null;
   fullReport = null;
   // The old schedule's worker goes before the new one is built.
   gtfsFeed?.release();
@@ -563,7 +529,7 @@ async function load(
     if (gen !== generation || loaded.type !== 'loaded') {
       return;
     }
-    fixes = loaded.fixes;
+    ready = w;
     render({ status: t('load.gtfsLoading') });
 
     let gtfs: GTFSScheduled | null = null;
@@ -601,33 +567,21 @@ async function load(
     } else {
       mapCtrl.clearScheduledFeed();
     }
-    const spans = loaded.metas.flatMap((m) =>
-      m.coverage.map(
-        (c) =>
-          [Date.parse(c.start) / 1000, Date.parse(c.end) / 1000] as [
-            number,
-            number,
-          ]
-      )
-    );
-    const days = timelineDays(
-      fixes.t,
-      fixes.vehicle,
-      fixes.trip,
-      spans,
+    const bins = await call(w, {
+      type: 'timeline',
       timeZone,
-      CONFIG.TIMELINE_BIN_S
-    );
-    if (days.length) {
-      const ends = fixes.t.length
-        ? [fixes.t[0], fixes.t[fixes.t.length - 1]]
-        : [Math.min(...spans.flat()), Math.max(...spans.flat())];
+      binS: CONFIG.TIMELINE_BIN_S,
+    });
+    if (gen !== generation || bins.type !== 'timeline') {
+      return;
+    }
+    if (bins.days.length) {
       timeline.setData({
-        days,
+        days: bins.days,
         zone: timeZone,
         binS: CONFIG.TIMELINE_BIN_S,
-        start: ends[0],
-        end: ends[1],
+        start: bins.start,
+        end: bins.end,
       });
     }
     render({ timeZone, feed: gtfs, status: t('load.scoring') });
@@ -646,7 +600,7 @@ async function load(
     if (filter.type !== 'home') {
       select(filter);
     } else {
-      requestGhosts();
+      requestFrame();
     }
   } catch (err) {
     if (gen !== generation) {
