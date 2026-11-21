@@ -10,7 +10,12 @@ import {
   scheduleAt,
   stopPolyline,
 } from '../src/metrics/baselines';
-import { buildDataset, type Fix, type Trip } from '../src/metrics/dataset';
+import {
+  buildDataset,
+  tripFixes,
+  type Fix,
+  type Trip,
+} from '../src/metrics/dataset';
 import { ghostsAt } from '../src/metrics/ghosts';
 import { score } from '../src/metrics/score';
 import { STOPS, at, csv, fixturePackage, iso, D } from './fixture';
@@ -24,7 +29,10 @@ describe('dataset', () => {
   it('resolves scheduled_stop_sequence through the package stop_visits', () => {
     const data = buildDataset([fixturePackage()]);
     expect(data.producers).toEqual(['p']);
-    expect([...data.predictions.keys()]).toEqual([`${D}|T1|30`]);
+    // Both rows land on the visit at stop_sequence 30, the trip's third.
+    const g = data.visitStart[data.tripIndex.get(`${D}|T1`)!] + 2;
+    expect(data.predStart[g + 1] - data.predStart[g]).toBe(2);
+    expect(data.predictions.ts.length).toBe(2);
     expect(data.unresolvedPredictions).toBe(0);
   });
 
@@ -73,7 +81,7 @@ describe('gps baseline', () => {
 
   it('compares the fix with the schedule at its distance', () => {
     const data = buildDataset([fixturePackage(undefined, [['10:15', 0.015]])]);
-    const series = gpsSeries(line, data.fixes.get(`${D}|T1`)!);
+    const series = gpsSeries(line, tripFixes(data, 0));
     // Halfway from B (10:10) to C (10:20) at 10:15: on time.
     expect(series.delay[0]).toBeCloseTo(0, 0);
     expect(gpsDelay(series, at('10:16'))).toBeCloseTo(0, 0);
@@ -81,14 +89,14 @@ describe('gps baseline', () => {
 
   it('drops a fix older than five minutes', () => {
     const data = buildDataset([fixturePackage(undefined, [['10:05', 0.005]])]);
-    const series = gpsSeries(line, data.fixes.get(`${D}|T1`)!);
+    const series = gpsSeries(line, tripFixes(data, 0));
     expect(gpsDelay(series, at('10:10'))).not.toBeNull();
     expect(gpsDelay(series, at('10:10') + 1)).toBeNull();
   });
 
   it('counts a fix at the origin as not late before departure', () => {
     const data = buildDataset([fixturePackage(undefined, [['09:55', 0]])]);
-    const series = gpsSeries(line, data.fixes.get(`${D}|T1`)!);
+    const series = gpsSeries(line, tripFixes(data, 0));
     expect(series.delay[0]).toBe(0);
   });
 

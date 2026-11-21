@@ -16,7 +16,8 @@ export const fr: Translation<typeof en> = {
   'nav.guide': 'Guide',
   'nav.load': 'Charger',
 
-  'load.title': 'Charger des données TIDES',
+  'search.vehicles': 'Véhicules',
+
   'load.archive': 'Depuis rt-archive.gtfs.zone',
   'load.from': 'Du',
   'load.to': 'Au',
@@ -24,26 +25,32 @@ export const fr: Translation<typeof en> = {
     '{n} jours archivés dans la période. L’archive compte {total} jours, du {first} au {last}.',
   'load.upload': 'Téléverser un paquet',
   'load.package': 'Paquet TIDES (zip, ou les fichiers du dossier d’un paquet)',
-  'load.gtfs': 'Zip GTFS (facultatif, pour la carte et la référence gps)',
   'load.actuals': 'Heures réelles d’une autre source (facultatif)',
   'load.actualsHint':
     'Un paquet TIDES dont les stop_visits remplacent ceux ci-dessus, appariés par date de service, course planifiée et numéro d’arrêt. Ajoutez son trips_performed si trip_id_performed diffère de trip_id_scheduled.',
+  'load.pickPackage': 'Choisissez un paquet TIDES à téléverser.',
+  'load.packageTitle': 'Paquet TIDES',
+  'load.uploadPackage': 'Téléverser un paquet TIDES',
+  'load.back': 'Retour',
+  'load.gtfsPicked': 'Horaires : {label}. Le paquet apporte les prédictions.',
+  'load.gtfsFromMeta':
+    'Le GTFS est celui que nomme le datapackage.json du paquet, s’il y en a un.',
+  'load.gtfsRestored': 'GTFS de {label} restauré depuis la copie enregistrée',
+  'load.storedMissing': 'Ce flux enregistré n’existe plus.',
   'load.submit': 'Charger',
   'load.cancel': 'Annuler',
   'load.indexFailed': 'Impossible de lire l’index de l’archive : {reason}',
-  'load.pickPackage':
-    'Choisissez un paquet à téléverser, ou un flux de l’archive.',
   'load.badRange':
     'La période doit aller vers l’avant et couvrir au plus {max} jours.',
   'load.progress': 'Chargement des paquets {done}/{total}',
   'load.gtfsLoading': 'Chargement de l’instantané GTFS',
+  'load.gtfsProgress': 'Chargement de l’instantané GTFS - {file} {bytes}',
+  'load.gtfsIndexing': 'Indexation de l’instantané GTFS',
   'load.gtfsFailed':
     'Pas d’instantané GTFS : {reason}. La référence gps est ignorée.',
   'load.scoring': 'Évaluation des prédictions',
   'load.loaded': '{label} chargé',
   'load.failed': 'Impossible de charger {label} : {reason}',
-  'load.search': 'Rechercher des flux',
-  'load.noFeeds': 'Aucun flux ne correspond.',
   'load.feedDays': '{producer}, {n} jours, dernier {last}',
   'load.dates': 'Dates',
   'load.full': 'Entièrement enregistré',

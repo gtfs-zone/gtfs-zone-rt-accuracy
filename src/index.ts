@@ -6,7 +6,22 @@ import {
   syncAutoZoomControl,
   wireAutoZoomControl,
 } from 'gtfs-zone-web-common/map/auto-zoom';
-import { GTFSScheduled } from 'gtfs-zone-web-common/gtfs/scheduled';
+import type {
+  GTFSScheduled,
+  LoadHooks,
+} from 'gtfs-zone-web-common/gtfs/scheduled';
+import {
+  ParseCache,
+  type CachedLoad,
+} from 'gtfs-zone-web-common/gtfs/parse-cache';
+import { resolvedScheduledUrl } from 'gtfs-zone-web-common/gtfs/feed-selection';
+import {
+  showLoadModal,
+  type LoadModalResult,
+  type OfferSection,
+} from 'gtfs-zone-web-common/ui/load-modal';
+import { formatBytes } from 'gtfs-zone-web-common/gtfs/feed-download';
+import type { LoadProgress } from 'gtfs-zone-web-common/gtfs/store/store-client';
 import {
   setHelpPages,
   showHelpModal,
@@ -17,6 +32,11 @@ import {
   setHelpRuntimeData,
 } from 'gtfs-zone-web-common/ui/help-pages';
 import { notify } from 'gtfs-zone-web-common/ui/notification-system';
+import {
+  searchPlaces,
+  type PlacePayload,
+} from 'gtfs-zone-web-common/map/place-search';
+import { SearchController } from 'gtfs-zone-web-common/ui/search-controller';
 import {
   PanelResizer,
   restorePanelWidth,
@@ -41,7 +61,6 @@ import {
   fetchArchiveIndex,
   type ArchiveIndex,
 } from './modules/archive-index';
-import { timelineDays } from './metrics/timeline';
 import {
   hashFor,
   readHash,
@@ -49,15 +68,20 @@ import {
   type ArchiveSelection,
 } from './modules/hash-state';
 import { HELP_PAGES } from './modules/help-pages';
-import { showLoadModal, type LoadChoice } from './modules/load-modal';
+import {
+  showLoadStep,
+  sortedDates,
+  type FeedPick,
+  type LoadChoice,
+} from './modules/load-step';
 import { isMetric, type Metric } from './modules/metrics-format';
 import { resizeHorizonChart } from './modules/horizon-chart';
 import { DOCK_ICONS, NAVBAR_ACTIONS } from './modules/navbar-action-list';
 import { isBaseline, producerColor } from './modules/producer-colors';
 import { ReportView, type ReportViewState } from './modules/report-view';
+import { buildSearchGroups } from './modules/search-entries';
 import { Timeline } from './modules/timeline';
 import type {
-  FixColumns,
   RequestBody,
   Response,
   ResponseBody,
@@ -184,57 +208,31 @@ function renderEmpty(): void {
     ?.addEventListener('click', () => void openLoad());
 }
 
+// ─── Map search ───────────────────────────────────────────────────────────────
+// Selecting a feed object narrows the panel like a map click; a place only
+// moves the map.
+const searchController = new SearchController<MapFocus | PlacePayload>({
+  getGroups: () => buildSearchGroups(gtfsFeed, frameVehicles),
+  getRemoteEntries: (query, signal) =>
+    searchPlaces(query, mapCtrl.getCenter(), signal),
+  onSelect: (payload) => {
+    if ('kind' in payload) {
+      mapCtrl.focusPlace(payload);
+    } else {
+      select(payload);
+    }
+  },
+});
+searchController.initialize();
+
 // ─── Map time ─────────────────────────────────────────────────────────────────
 
 const timeline = new Timeline(document.getElementById('timeline')!);
-let fixes: FixColumns | null = null;
+/** The worker whose dataset is loaded, or null while a load runs. */
+let ready: Worker | null = null;
 
-function lowerBound(values: Float64Array, x: number): number {
-  let lo = 0;
-  let hi = values.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (values[mid] < x) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-  return lo;
-}
-
-/** Each vehicle at its latest fix in (time - FIX_MAX_AGE_S, time]. */
-function vehiclesAt(time: number): AccuracyVehicle[] {
-  if (!fixes) {
-    return [];
-  }
-  const from = lowerBound(fixes.t, time - CONFIG.FIX_MAX_AGE_S);
-  const latest = new Map<string, number>();
-  for (let i = from; i < fixes.t.length && fixes.t[i] <= time; i++) {
-    latest.set(fixes.vehicle[i] || `#${i}`, i);
-  }
-  return [...latest].map(([key, i]) => ({
-    key,
-    vehicleId: fixes!.vehicle[i],
-    entityId: key,
-    lat: fixes!.lat[i],
-    lon: fixes!.lon[i],
-    bearing: Number.isNaN(fixes!.heading[i]) ? undefined : fixes!.heading[i],
-    tripId: fixes!.trip[i] || undefined,
-    routeId: fixes!.route[i] || undefined,
-    timestamp: fixes!.t[i],
-    raw: null,
-    tripKey: fixes!.trip[i] ? `${fixes!.serviceDate[i]}|${fixes!.trip[i]}` : '',
-  }));
-}
-
-timeline.onChange = (time) => {
-  const vehicles = vehiclesAt(time);
-  timeline.setVehicleCount(vehicles.length);
-  mapCtrl.showVehicles(vehicles);
-  requestGhosts();
-};
-timeline.onGhosts = () => requestGhosts();
+timeline.onChange = () => requestFrame();
+timeline.onGhosts = () => requestFrame();
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
 
@@ -320,7 +318,7 @@ function select(focus: MapFocus): void {
 async function applyFilter(focus: MapFocus): Promise<void> {
   filter = focus;
   writeHash(selection, focus);
-  requestGhosts();
+  requestFrame();
   const seq = ++scoreSeq;
   const narrowed = scoreFilter(focus);
   if (!fullReport || !worker) {
@@ -350,6 +348,8 @@ async function applyFilter(focus: MapFocus): Promise<void> {
 }
 
 let ghosts: Ghost[] = [];
+/** The vehicles of the last drawn frame, for the map search. */
+let frameVehicles: AccuracyVehicle[] = [];
 let ghostSeq = 0;
 let ghostBusy = false;
 let ghostAgain = false;
@@ -365,11 +365,16 @@ function drawGhosts(): void {
   );
 }
 
-/** Ask for the ghosts at the slider time; one request runs at a time. */
-function requestGhosts(): void {
-  const producers = timeline.enabledGhosts();
+/**
+ * Ask for the vehicles and ghosts at the slider time; one request runs at a
+ * time, and the latest slider time is asked for when it finishes.
+ */
+function requestFrame(): void {
   const seq = ++ghostSeq;
-  if (!worker || !fullReport || !fixes || producers.length === 0) {
+  if (!ready || ready !== worker) {
+    timeline.setVehicleCount(0);
+    frameVehicles = [];
+    mapCtrl.showVehicles([]);
     ghosts = [];
     drawGhosts();
     return;
@@ -379,46 +384,124 @@ function requestGhosts(): void {
     return;
   }
   ghostBusy = true;
-  const w = worker;
+  const w = ready;
   call(w, {
-    type: 'ghosts',
+    type: 'frame',
     time: timeline.current,
-    producers,
+    producers: fullReport ? timeline.enabledGhosts() : [],
     maxAge: CONFIG.FIX_MAX_AGE_S,
     filter: scoreFilter(filter),
   })
     .then((msg) => {
-      if (seq === ghostSeq && w === worker && msg.type === 'ghosts') {
+      if (seq === ghostSeq && w === worker && msg.type === 'frame') {
+        const vehicles: AccuracyVehicle[] = msg.vehicles.map((v) => ({
+          ...v,
+          entityId: v.key,
+          raw: null,
+        }));
+        timeline.setVehicleCount(vehicles.length);
+        frameVehicles = vehicles;
+        mapCtrl.showVehicles(vehicles);
         ghosts = msg.ghosts;
         drawGhosts();
       }
     })
     .catch(() => {
-      // A failed ghost request leaves the last ghosts drawn.
+      // A failed frame request leaves the last frame drawn.
     })
     .finally(() => {
       ghostBusy = false;
       if (ghostAgain) {
         ghostAgain = false;
-        requestGhosts();
+        requestFrame();
       }
     });
 }
 
+/** GTFS tables accuracy never reads. */
+const SKIP_TABLES = [
+  'calendar_dates',
+  'transfers',
+  'translations',
+  'frequencies',
+  'pathways',
+  'levels',
+  'attributions',
+  'fare_attributes',
+  'fare_rules',
+  'fare_media',
+  'fare_products',
+  'fare_leg_rules',
+  'fare_leg_join_rules',
+  'fare_transfer_rules',
+  'rider_categories',
+  'timeframes',
+  'areas',
+  'stop_areas',
+  'networks',
+  'route_networks',
+  'location_groups',
+  'location_group_stops',
+  'booking_rules',
+];
+
+/** The status line for one GTFS load step. */
+function gtfsProgressText(p: LoadProgress): string {
+  if (p.stage === 'index') {
+    return t('load.gtfsIndexing');
+  }
+  const bytes = p.total
+    ? `${formatBytes(p.bytes)} / ${formatBytes(p.total)}`
+    : formatBytes(p.bytes);
+  return t('load.gtfsProgress', {
+    file: p.table ? `${p.table}.txt` : '',
+    bytes,
+  });
+}
+
+/** What the parse cache keeps with a stored GTFS. */
+interface StoredExtra {
+  /** The archive feed it came with, so "Your feeds" reopens its dates. */
+  archive?: string;
+}
+
+const parseCache = new ParseCache('accuracy');
+/** The parse cache entry of the loaded GTFS, or null. */
+let gtfsEntryId: string | null = null;
+
 async function loadGtfs(
   choice: LoadChoice,
-  url: string | null
-): Promise<GTFSScheduled | null> {
-  const feed = new GTFSScheduled();
+  metaUrl: string | null,
+  label: string,
+  hooks: LoadHooks
+): Promise<CachedLoad | null> {
+  // Every trip stays on the main thread for the report; stop_times only as
+  // stop lists, for route geometry where the feed has no shapes.
+  const options = {
+    mirror: 'trips',
+    stopTimes: 'patterns',
+    skipTables: SKIP_TABLES,
+  } as const;
   if (choice.kind === 'upload' && choice.gtfs) {
-    await feed.loadFromFile(choice.gtfs);
-    return feed;
+    const { input, sourceUrl } = choice.gtfs;
+    return parseCache.load(
+      input,
+      { label: choice.gtfs.label, sourceUrl },
+      options,
+      hooks
+    );
   }
-  if (!url) {
+  if (!metaUrl) {
     return null;
   }
-  await feed.loadFromUrl(url);
-  return feed;
+  const extra: StoredExtra =
+    choice.kind === 'archive' ? { archive: choice.feed } : {};
+  return parseCache.load(
+    { url: metaUrl },
+    { label: choice.kind === 'archive' ? choice.feed : label, extra },
+    options,
+    hooks
+  );
 }
 
 function describe(choice: LoadChoice): string {
@@ -433,6 +516,8 @@ function describe(choice: LoadChoice): string {
 }
 
 let generation = 0;
+/** Aborts the GTFS load of a superseded `load`. */
+let gtfsAbort = new AbortController();
 
 async function load(
   choice: LoadChoice,
@@ -440,6 +525,8 @@ async function load(
   focus: MapFocus = { type: 'home' }
 ) {
   const gen = ++generation;
+  gtfsAbort.abort();
+  gtfsAbort = new AbortController();
   const label = describe(choice);
   worker?.terminate();
   const w = new Worker(
@@ -449,15 +536,20 @@ async function load(
     }
   );
   worker = w;
-  fixes = null;
+  ready = null;
   fullReport = null;
+  // The old schedule's worker goes before the new one is built.
+  gtfsFeed?.release();
   gtfsFeed = null;
+  gtfsEntryId = null;
+  mapCtrl.clearScheduledFeed();
   filter = focus;
   ghosts = [];
   ghostBusy = false;
   ghostAgain = false;
   timeline.setProducers([]);
   timeline.setData(null);
+  frameVehicles = [];
   mapCtrl.clearVehicles();
   mapCtrl.showGhosts([]);
   view = {
@@ -505,22 +597,45 @@ async function load(
     if (gen !== generation || loaded.type !== 'loaded') {
       return;
     }
-    fixes = loaded.fixes;
+    ready = w;
     render({ status: t('load.gtfsLoading') });
 
-    let gtfs: GTFSScheduled | null = null;
+    let cached: CachedLoad | null = null;
     try {
-      gtfs = await loadGtfs(
+      cached = await loadGtfs(
         choice,
-        loaded.metas[loaded.metas.length - 1]?.gtfs ?? null
+        loaded.metas[loaded.metas.length - 1]?.gtfs ?? null,
+        label,
+        {
+          signal: gtfsAbort.signal,
+          onProgress: (p) => {
+            if (gen === generation) {
+              render({ status: gtfsProgressText(p) });
+            }
+          },
+        }
       );
     } catch (err) {
-      notify.warning(
-        t('load.gtfsFailed', { reason: String((err as Error).message ?? err) })
-      );
+      // A superseded load's GTFS is aborted on purpose.
+      if (gen === generation) {
+        notify.warning(
+          t('load.gtfsFailed', {
+            reason: String((err as Error).message ?? err),
+          })
+        );
+      }
     }
+    const gtfs = cached?.feed ?? null;
     if (gen !== generation) {
+      gtfs?.release();
       return;
+    }
+    gtfsEntryId = cached?.entry?.id ?? null;
+    if (cached?.restored) {
+      notify.info(t('load.gtfsRestored', { label: cached.entry?.label ?? '' }));
+    }
+    if (cached?.storeError) {
+      notify.warning(cached.storeError);
     }
     const timeZone = gtfs?.agencies[0]?.timezone || 'UTC';
     gtfsFeed = gtfs;
@@ -529,33 +644,21 @@ async function load(
     } else {
       mapCtrl.clearScheduledFeed();
     }
-    const spans = loaded.metas.flatMap((m) =>
-      m.coverage.map(
-        (c) =>
-          [Date.parse(c.start) / 1000, Date.parse(c.end) / 1000] as [
-            number,
-            number,
-          ]
-      )
-    );
-    const days = timelineDays(
-      fixes.t,
-      fixes.vehicle,
-      fixes.trip,
-      spans,
+    const bins = await call(w, {
+      type: 'timeline',
       timeZone,
-      CONFIG.TIMELINE_BIN_S
-    );
-    if (days.length) {
-      const ends = fixes.t.length
-        ? [fixes.t[0], fixes.t[fixes.t.length - 1]]
-        : [Math.min(...spans.flat()), Math.max(...spans.flat())];
+      binS: CONFIG.TIMELINE_BIN_S,
+    });
+    if (gen !== generation || bins.type !== 'timeline') {
+      return;
+    }
+    if (bins.days.length) {
       timeline.setData({
-        days,
+        days: bins.days,
         zone: timeZone,
         binS: CONFIG.TIMELINE_BIN_S,
-        start: ends[0],
-        end: ends[1],
+        start: bins.start,
+        end: bins.end,
       });
     }
     render({ timeZone, feed: gtfs, status: t('load.scoring') });
@@ -574,7 +677,7 @@ async function load(
     if (filter.type !== 'home') {
       select(filter);
     } else {
-      requestGhosts();
+      requestFrame();
     }
   } catch (err) {
     if (gen !== generation) {
@@ -595,11 +698,117 @@ async function archiveIndex(): Promise<[ArchiveIndex | null, string | null]> {
   }
 }
 
+/** The archive feeds as the shared modal's first section. */
+function archiveSection(
+  index: ArchiveIndex | null,
+  error: string | null
+): OfferSection {
+  const feeds = index ? Object.keys(index.feeds).sort() : [];
+  return {
+    heading: t('load.archive'),
+    note: error ?? undefined,
+    offers: feeds.map((feed) => {
+      const dates = sortedDates(index!, feed);
+      return {
+        id: feed,
+        name: feed,
+        subtitle: t('load.feedDays', {
+          producer: index!.feeds[feed].producer,
+          n: dates.length,
+          last: dates[dates.length - 1] ?? '-',
+        }),
+        active: feed === selection?.feed,
+      };
+    }),
+  };
+}
+
+/** The shared modal's result as a pick for the next step, or null. */
+function feedPick(
+  result: LoadModalResult,
+  index: ArchiveIndex | null
+): FeedPick | null {
+  switch (result?.kind) {
+    case 'offer':
+      return { kind: 'archive', feed: result.id };
+    case 'stored': {
+      const entry = parseCache.get(result.id);
+      if (!entry) {
+        notify.error(t('load.storedMissing'));
+        return null;
+      }
+      const archive = (entry.extra as StoredExtra | undefined)?.archive;
+      if (archive && index?.feeds[archive]) {
+        return { kind: 'archive', feed: archive };
+      }
+      return {
+        kind: 'gtfs',
+        gtfs: {
+          input: { stored: entry.id },
+          label: entry.label,
+          sourceUrl: entry.sourceUrl,
+        },
+      };
+    }
+    case 'update':
+    case 'selection': {
+      const scheduled = result.selection.scheduled;
+      if (!scheduled) {
+        return null;
+      }
+      return {
+        kind: 'gtfs',
+        gtfs:
+          scheduled.kind === 'file'
+            ? { input: { file: scheduled.file }, label: scheduled.label }
+            : {
+                input: { url: resolvedScheduledUrl(scheduled) },
+                label: scheduled.label,
+                sourceUrl: scheduled.url,
+              },
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 async function openLoad(): Promise<void> {
   const [index, error] = await archiveIndex();
-  const choice = await showLoadModal(index, error, readHash() ?? {});
-  if (choice) {
-    await load(choice, index);
+  for (;;) {
+    let packageOnly = false;
+    const result = await showLoadModal(null, {
+      realtime: false,
+      sections: [archiveSection(index, error)],
+      library: {
+        feeds: parseCache.offers(gtfsEntryId),
+        onDelete: (id) => parseCache.delete(id),
+      },
+      extraActions: [
+        {
+          label: t('load.uploadPackage'),
+          className: 'btn-ghost',
+          onClick: () => {
+            packageOnly = true;
+          },
+        },
+      ],
+    });
+    const pick: FeedPick | null = packageOnly
+      ? { kind: 'package' }
+      : feedPick(result, index);
+    if (!pick) {
+      return;
+    }
+    console.log(`[load] picked ${pick.kind}`);
+    const choice = await showLoadStep(pick, index, readHash() ?? {});
+    if (choice === 'back') {
+      continue;
+    }
+    if (choice) {
+      await load(choice, index);
+    }
+    return;
   }
 }
 

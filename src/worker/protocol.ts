@@ -2,6 +2,8 @@
 
 import type { Ghost } from '../metrics/ghosts';
 import type { Report, ScoreFilter } from '../metrics/score';
+import type { TimelineDay } from '../metrics/timeline';
+import type { FrameVehicle } from '../metrics/vehicles';
 
 /** One TIDES package: a day from the archive, or uploaded files. */
 export type Source =
@@ -23,19 +25,6 @@ export interface PackageMeta {
   gtfs: string | null;
 }
 
-/** Vehicle fixes as columns, sorted by time, for the map. */
-export interface FixColumns {
-  t: Float64Array;
-  lat: Float64Array;
-  lon: Float64Array;
-  /** NaN when absent. */
-  heading: Float64Array;
-  vehicle: string[];
-  trip: string[];
-  route: string[];
-  serviceDate: string[];
-}
-
 export type RequestBody =
   | { type: 'load'; packages: Source[]; actuals: Source | null }
   | {
@@ -49,13 +38,15 @@ export type RequestBody =
       filter?: ScoreFilter;
     }
   | {
-      type: 'ghosts';
+      /** The vehicles at `time`, and the ghosts of `producers` around them. */
+      type: 'frame';
       time: number;
       producers: string[];
       /** Seconds a fix stays current. */
       maxAge: number;
       filter?: ScoreFilter;
-    };
+    }
+  | { type: 'timeline'; timeZone: string; binS: number };
 
 /** Every request carries an id that its responses echo. */
 export type Request = RequestBody & { id: number };
@@ -65,11 +56,17 @@ export type ResponseBody =
   | {
       type: 'loaded';
       metas: PackageMeta[];
-      fixes: FixColumns;
       predictions: number;
     }
   | { type: 'report'; report: Report }
-  | { type: 'ghosts'; ghosts: Ghost[] }
+  | { type: 'frame'; vehicles: FrameVehicle[]; ghosts: Ghost[] }
+  | {
+      type: 'timeline';
+      days: TimelineDay[];
+      /** First and last fix, else the recorded coverage. */
+      start: number;
+      end: number;
+    }
   | { type: 'error'; message: string };
 
 export type Response = ResponseBody & { id: number };
