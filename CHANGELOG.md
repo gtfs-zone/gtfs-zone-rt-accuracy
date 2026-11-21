@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.5.0 (2026-11-21)
+
+### Feat
+
+- **search**: map search with stops, routes, vehicles and places
+- **load**: pick feeds in the shared load modal, keep the GTFS in the parse cache
+- **load**: stream TIDES packages one day at a time
+- **load**: show GTFS load progress and skip unused GTFS tables
+- **feed**: load the schedule through the web-common v5.22.0 feed store
+
+### Perf
+
+- **worker**: serve map vehicles and timeline bins from the worker
+- **dataset**: keep predictions and vehicle fixes as typed-array tables
+
 ## v0.4.0 (2026-11-12)
 
 ### Feat
