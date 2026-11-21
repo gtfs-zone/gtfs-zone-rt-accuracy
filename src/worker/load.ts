@@ -1,22 +1,13 @@
-/** Reads TIDES packages from the archive or from uploaded files. */
+/**
+ * Streams TIDES packages from the archive or from uploaded files into a
+ * `DatasetBuilder`, one table at a time, so no table is held whole.
+ */
 
-import JSZip from 'jszip';
-import Papa from 'papaparse';
+import { Unzip, UnzipInflate } from 'fflate';
 import { CONFIG } from '../config';
-import type { PackageTables, Row } from '../metrics/dataset';
+import { TABLE_ORDER, type DatasetBuilder } from '../metrics/dataset';
+import { streamCsv } from './csv';
 import type { PackageMeta, Source } from './protocol';
-
-const TABLES = [
-  'trips_performed',
-  'stop_visits',
-  'vehicle_locations',
-  'stop_time_predictions',
-] as const;
-
-export interface LoadedPackage {
-  meta: PackageMeta;
-  tables: PackageTables;
-}
 
 interface DataPackage {
   name?: string;
@@ -25,37 +16,161 @@ interface DataPackage {
   gtfs_zone?: { coverage?: PackageMeta['coverage']; gtfs?: string };
 }
 
-/** Reads a file of the package by path, or null when it is missing. */
-type Reader = (path: string) => Promise<string | null>;
+/** Opens a file of the package by path, or null when it is missing. */
+type Opener = (path: string) => Promise<ReadableStream<Uint8Array> | null>;
 
-function parseCsv(text: string | null): Row[] {
-  if (!text) {
-    return [];
-  }
-  return Papa.parse<Row>(text, { header: true, skipEmptyLines: true }).data;
+function basename(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
 }
 
-async function readPackage(
-  read: Reader,
-  fallbackName: string
-): Promise<LoadedPackage> {
-  const raw = await read('datapackage.json');
-  const dp: DataPackage = raw ? JSON.parse(raw) : {};
+/**
+ * One entry of a zip, inflated as it is read. Each call reads the zip from
+ * the start, which is cheap for a local file and frees the tables from
+ * having to sit in the zip in `TABLE_ORDER`.
+ */
+function zipEntry(
+  zip: File,
+  name: string
+): Promise<ReadableStream<Uint8Array> | null> {
+  return new Promise((resolve, reject) => {
+    let found = false;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const out = new ReadableStream<Uint8Array>({
+      start: (c) => {
+        controller = c;
+      },
+    });
+    const uz = new Unzip((file) => {
+      if (found || basename(file.name) !== name) {
+        return;
+      }
+      found = true;
+      resolve(out);
+      file.ondata = (err, chunk, final) => {
+        if (err) {
+          controller.error(err);
+          return;
+        }
+        if (chunk.length) {
+          controller.enqueue(chunk);
+        }
+        if (final) {
+          controller.close();
+        }
+      };
+      file.start();
+    });
+    uz.register(UnzipInflate);
+    const read = async (): Promise<void> => {
+      const reader = zip.stream().getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        uz.push(value, false);
+      }
+      uz.push(new Uint8Array(0), true);
+      if (!found) {
+        resolve(null);
+      }
+    };
+    read().catch((err) => {
+      if (found) {
+        controller.error(err);
+      } else {
+        reject(err);
+      }
+    });
+  });
+}
+
+/** Files keyed by base name, so a package nested in a folder still reads. */
+function fileOpener(files: File[]): Opener {
+  if (files.length === 1 && files[0].name.toLowerCase().endsWith('.zip')) {
+    const zip = files[0];
+    return (path) => zipEntry(zip, basename(path));
+  }
+  const byName = new Map(files.map((f) => [basename(f.name), f]));
+  return async (path) => byName.get(basename(path))?.stream() ?? null;
+}
+
+export function archiveUrl(feed: string, date: string, path = ''): string {
+  return `${CONFIG.ARCHIVE_BASE}/tides/${encodeURIComponent(feed)}/${date}/${path}`;
+}
+
+function archiveOpener(feed: string, date: string): Opener {
+  return async (path) => {
+    // Packages are served gzipped with Content-Encoding, so fetch decodes them.
+    const res = await fetch(archiveUrl(feed, date, path));
+    if (res.status === 404 || res.status === 403) {
+      return null;
+    }
+    if (!res.ok) {
+      throw new Error(`${path}: HTTP ${res.status}`);
+    }
+    return res.body;
+  };
+}
+
+export interface StreamedPackage {
+  meta: PackageMeta;
+  /** stop_time_predictions rows read. */
+  predictions: number;
+}
+
+/**
+ * Stream one source into `builder` as a package of `role`. Null for an
+ * archive day with no package, in which case the builder is not touched.
+ */
+export async function streamSource(
+  source: Source,
+  builder: DatasetBuilder,
+  role: 'predictions' | 'actuals'
+): Promise<StreamedPackage | null> {
+  let open: Opener;
+  let fallbackName: string;
+  if (source.kind === 'files') {
+    open = fileOpener(source.files);
+    fallbackName = source.files[0]?.name ?? 'upload';
+  } else {
+    open = archiveOpener(source.feed, source.date);
+    fallbackName = `${source.feed}-${source.date}`;
+  }
+
+  const dpStream = await open('datapackage.json');
+  if (!dpStream && source.kind === 'archive') {
+    return null;
+  }
+  const dp: DataPackage = dpStream
+    ? JSON.parse(await new Response(dpStream).text())
+    : {};
   const paths = new Map<string, string>();
   for (const r of dp.resources ?? []) {
     if (r.name && r.path) {
       paths.set(r.name, r.path);
     }
   }
-  const texts = await Promise.all(
-    TABLES.map((table) => read(paths.get(table) ?? `${table}.csv`))
-  );
-  if (texts.every((t) => t === null)) {
+
+  builder.beginPackage(role);
+  let found = 0;
+  let predictions = 0;
+  for (const table of TABLE_ORDER) {
+    const stream = await open(paths.get(table) ?? `${table}.csv`);
+    if (!stream) {
+      continue;
+    }
+    found++;
+    const rows = await streamCsv(stream, (batch) => builder.rows(table, batch));
+    if (table === 'stop_time_predictions') {
+      predictions = rows;
+    }
+    console.log(`[Load] ${fallbackName} ${table}: ${rows} rows`);
+  }
+  builder.endPackage();
+  if (found === 0) {
     throw new Error(`no TIDES tables in ${fallbackName}`);
   }
-  const tables = Object.fromEntries(
-    TABLES.map((table, i) => [table, parseCsv(texts[i])])
-  ) as unknown as PackageTables;
   return {
     meta: {
       name: dp.name ?? fallbackName,
@@ -63,63 +178,6 @@ async function readPackage(
       coverage: dp.gtfs_zone?.coverage ?? [],
       gtfs: dp.gtfs_zone?.gtfs ?? null,
     },
-    tables,
+    predictions,
   };
-}
-
-function basename(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1);
-}
-
-/** Files keyed by base name, so a package nested in a folder still reads. */
-async function fileReader(files: File[]): Promise<Reader> {
-  if (files.length === 1 && files[0].name.toLowerCase().endsWith('.zip')) {
-    const zip = await JSZip.loadAsync(files[0]);
-    const entries = new Map<string, JSZip.JSZipObject>();
-    zip.forEach((path, entry) => {
-      if (!entry.dir) {
-        entries.set(basename(path), entry);
-      }
-    });
-    return async (path) =>
-      (await entries.get(basename(path))?.async('text')) ?? null;
-  }
-  const byName = new Map(files.map((f) => [basename(f.name), f]));
-  return async (path) => (await byName.get(basename(path))?.text()) ?? null;
-}
-
-export function archiveUrl(feed: string, date: string, path = ''): string {
-  return `${CONFIG.ARCHIVE_BASE}/tides/${encodeURIComponent(feed)}/${date}/${path}`;
-}
-
-/** Loads one source; null for an archive day with no package. */
-export async function loadSource(
-  source: Source
-): Promise<LoadedPackage | null> {
-  if (source.kind === 'files') {
-    const name = source.files[0]?.name ?? 'upload';
-    return readPackage(await fileReader(source.files), name);
-  }
-  const fetched = new Map<string, Promise<string | null>>();
-  const fetchText = async (path: string): Promise<string | null> => {
-    // Packages are served gzipped with Content-Encoding, so fetch decodes them.
-    const res = await fetch(archiveUrl(source.feed, source.date, path));
-    if (res.status === 404 || res.status === 403) {
-      return null;
-    }
-    if (!res.ok) {
-      throw new Error(`${path}: HTTP ${res.status}`);
-    }
-    return res.text();
-  };
-  const read: Reader = (path) => {
-    if (!fetched.has(path)) {
-      fetched.set(path, fetchText(path));
-    }
-    return fetched.get(path)!;
-  };
-  if ((await read('datapackage.json')) === null) {
-    return null;
-  }
-  return readPackage(read, `${source.feed}-${source.date}`);
 }

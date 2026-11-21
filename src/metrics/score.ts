@@ -15,12 +15,7 @@ import {
   lastStopDelay,
   type TripBaselines,
 } from './baselines';
-import {
-  visitKey,
-  type Dataset,
-  type PredictionRow,
-  type Trip,
-} from './dataset';
+import { producerRows, type Dataset, type Trip } from './dataset';
 
 export const SAMPLE_STEP = 60;
 export const HORIZONS: [number, number][] = [
@@ -205,6 +200,18 @@ function hourOfDay(timeZone: string): (s: number) => number {
   };
 }
 
+/** Pick the arrival or departure value matching the target; NaN is absent. */
+function pickRow(arrival: boolean, arr: number, dep: number): number | null {
+  const v = arrival
+    ? Number.isNaN(arr)
+      ? dep
+      : arr
+    : Number.isNaN(dep)
+      ? arr
+      : dep;
+  return Number.isNaN(v) ? null : v;
+}
+
 /** Pick the arrival or departure value matching the target. */
 function pick(
   arrival: boolean,
@@ -242,10 +249,13 @@ export function score(data: Dataset, opts: ScoreOptions): Report {
 
   const values = new Float64Array(np);
   const has = new Uint8Array(np);
-  const rows: (PredictionRow[] | undefined)[] = new Array(recorded);
+  const pred = data.predictions;
+  const start = new Int32Array(recorded);
+  const end = new Int32Array(recorded);
   const ptr = new Int32Array(recorded);
 
-  for (const trip of data.trips.values()) {
+  for (let tn = 0; tn < data.tripList.length; tn++) {
+    const trip = data.tripList[tn];
     if (!tripMatches(trip, opts.filter)) {
       continue;
     }
@@ -253,7 +263,8 @@ export function score(data: Dataset, opts: ScoreOptions): Report {
     let base: TripBaselines | null = null;
     const dateGroup = byDate.get(trip.serviceDate);
     const routeGroup = byRoute.get(trip.routeId || '-');
-    for (const visit of trip.visits) {
+    for (let v = 0; v < trip.visits.length; v++) {
+      const visit = trip.visits[v];
       if (stopIds && !stopIds.has(visit.stopId)) {
         continue;
       }
@@ -264,17 +275,18 @@ export function score(data: Dataset, opts: ScoreOptions): Report {
       }
       counts.visitsWithActual++;
       const arrival = visit.actArr !== null;
-      const byProducer = data.predictions.get(visitKey(trip.key, visit.seq));
-      if (!byProducer) {
+      const g = data.visitStart[tn] + v;
+      if (data.predStart[g] === data.predStart[g + 1]) {
         continue;
       }
       let first = Infinity;
       for (let p = 0; p < recorded; p++) {
-        rows[p] = byProducer.get(producers[p]);
-        ptr[p] = -1;
-        const r = rows[p];
-        if (r && r.length && r[0].ts < first) {
-          first = r[0].ts;
+        const [a, b] = producerRows(data, g, p);
+        start[p] = a;
+        end[p] = b;
+        ptr[p] = a - 1;
+        if (b > a && pred.ts[a] < first) {
+          first = pred.ts[a];
         }
       }
       if (first >= actual) {
@@ -295,20 +307,16 @@ export function score(data: Dataset, opts: ScoreOptions): Report {
           continue;
         }
         for (let p = 0; p < recorded; p++) {
-          const r = rows[p];
           has[p] = 0;
-          if (!r) {
-            continue;
-          }
           let i = ptr[p];
-          while (i + 1 < r.length && r[i + 1].ts <= s) {
+          while (i + 1 < end[p] && pred.ts[i + 1] <= s) {
             i++;
           }
           ptr[p] = i;
-          if (i >= 0) {
-            const v = pick(arrival, r[i].arr, r[i].dep);
-            if (v !== null) {
-              values[p] = v;
+          if (i >= start[p]) {
+            const value = pickRow(arrival, pred.arr[i], pred.dep[i]);
+            if (value !== null) {
+              values[p] = value;
               has[p] = 1;
             }
           }
